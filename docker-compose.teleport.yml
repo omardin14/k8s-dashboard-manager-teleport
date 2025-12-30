@@ -1,0 +1,93 @@
+services:
+  teleport:
+    # Following official Teleport guide: https://goteleport.com/docs/get-started/deploy-community/
+    # Uses Ubuntu base image and installs Teleport via install script
+    image: ubuntu:22.04
+    container_name: teleport
+    hostname: teleport
+    restart: unless-stopped
+    ports:
+      - "3080:443"  # Web UI and Proxy (HTTPS)
+      - "3023:3023"  # SSH
+      - "3024:3024"  # Kubernetes
+      - "3025:3025"  # Application Access
+    volumes:
+      - ./teleport-data:/var/lib/teleport
+      - ./teleport-config:/etc/teleport
+      - ./teleport-tls:/etc/teleport-tls
+    command: >
+      sh -c "
+        echo '🚀 Starting Teleport setup...' &&
+        # Install curl (required for Teleport install script)
+        apt-get update -qq && apt-get install -y -qq curl ca-certificates >/dev/null 2>&1 &&
+        echo '✅ Installed dependencies' &&
+        # Move mkcert CA certificate to system CA certs directory
+        if [ -f /etc/teleport-tls/rootCA.pem ]; then
+          cp /etc/teleport-tls/rootCA.pem /etc/ssl/certs/mkcertCA.pem 2>/dev/null || true
+          echo '✅ Copied mkcert CA certificate'
+        fi &&
+        # Install Teleport if not already installed
+        if ! command -v teleport >/dev/null 2>&1; then
+          echo '📦 Installing Teleport...' &&
+          curl -fsSL https://cdn.teleport.dev/install.sh | bash -s 18.6.0 &&
+          echo '✅ Teleport installed'
+        else
+          echo '✅ Teleport already installed'
+        fi &&
+        # Verify certificates exist
+        if [ ! -f /etc/teleport-tls/localhost.pem ] || [ ! -f /etc/teleport-tls/localhost-key.pem ]; then
+          echo '❌ ERROR: Certificates not found at /etc/teleport-tls/localhost.pem' &&
+          echo '   Expected files: localhost.pem, localhost-key.pem' &&
+          ls -la /etc/teleport-tls/ || echo '   Directory does not exist' &&
+          exit 1
+        fi &&
+        echo '✅ Certificates found' &&
+        # Clear data directory if it exists (to avoid cluster state conflicts)
+        if [ -d /var/lib/teleport ] && [ "$(ls -A /var/lib/teleport 2>/dev/null)" ]; then
+          echo '⚠️  Clearing existing data directory...' &&
+          rm -rf /var/lib/teleport/* /var/lib/teleport/.* 2>/dev/null || true
+        fi &&
+        # Remove existing config if it exists (might be corrupted)
+        if [ -f /etc/teleport/teleport.yaml ]; then
+          echo '⚠️  Removing existing config file...' &&
+          rm -f /etc/teleport/teleport.yaml
+        fi &&
+        # Also check default location
+        if [ -f /etc/teleport.yaml ]; then
+          echo '⚠️  Removing existing config file from default location...' &&
+          rm -f /etc/teleport.yaml
+        fi &&
+        # Generate config
+        echo '⚙️  Configuring Teleport...' &&
+        teleport configure -o file --cluster-name=localhost --public-addr=localhost:443 --cert-file=/etc/teleport-tls/localhost.pem --key-file=/etc/teleport-tls/localhost-key.pem 2>&1 &&
+        # Move config to mounted directory if it was created in default location
+        if [ -f /etc/teleport.yaml ] && [ ! -f /etc/teleport/teleport.yaml ]; then
+          echo '📦 Moving config to mounted directory...' &&
+          mv /etc/teleport.yaml /etc/teleport/teleport.yaml
+        fi &&
+        echo '✅ Teleport configured' &&
+        # Determine config file path
+        if [ -f /etc/teleport/teleport.yaml ]; then
+          CONFIG_PATH=/etc/teleport/teleport.yaml
+        elif [ -f /etc/teleport.yaml ]; then
+          CONFIG_PATH=/etc/teleport.yaml
+        else
+          echo '❌ ERROR: Config file not found!' &&
+          exit 1
+        fi &&
+        echo '🚀 Starting Teleport with config: '"$$CONFIG_PATH"'...' &&
+        # Start Teleport in foreground
+        exec teleport start --config="$$CONFIG_PATH"
+      "
+    networks:
+      - teleport-network
+    healthcheck:
+      test: ["CMD-SHELL", "teleport status 2>/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 180s
+
+networks:
+  teleport-network:
+    driver: bridge
