@@ -1,0 +1,16 @@
+1. Get the Kubernetes Dashboard ClusterIP:
+   export CLUSTER_IP=$(kubectl -n {{ .Values.namespace.name }} get svc kubernetes-dashboard -o jsonpath="{.spec.clusterIP}")
+   echo "Dashboard ClusterIP: $CLUSTER_IP"
+
+2. Get the admin token:
+   kubectl get secret dashboard-admin-token -n {{ .Values.namespace.name }} -o jsonpath="{.data.token}" | base64 -d
+
+3. Get the readonly token:
+   kubectl get secret dashboard-readonly-token -n {{ .Values.namespace.name }} -o jsonpath="{.data.token}" | base64 -d
+
+4. Access the dashboard via Teleport:
+   - Log into your Teleport web UI
+   - Go to Applications
+   - Click on "kube-dashboard-admin" for admin access or "kube-dashboard-readonly" for readonly access
+   - Paste the appropriate token when prompted
+

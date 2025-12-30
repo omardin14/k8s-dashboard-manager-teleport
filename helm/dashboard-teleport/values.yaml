@@ -1,0 +1,47 @@
+# Default values for dashboard-teleport
+nameOverride: ""
+fullnameOverride: ""
+
+namespace:
+  name: kubernetes-dashboard
+
+rbac:
+  enabled: true
+
+# Kubernetes Dashboard Configuration
+dashboard:
+  enabled: true
+  # Dashboard will be deployed via dependency chart
+  # Override values for kubernetes-dashboard chart here if needed
+
+# Teleport Configuration
+teleport:
+  enabled: true
+  namespace: teleport-agent
+  joinToken: ""  # Set via config.yaml or --set teleport.joinToken=YOUR_TOKEN
+  proxyAddr: ""  # Set via config.yaml or --set teleport.proxyAddr=your-proxy.teleport.com:443
+  clusterName: ""  # Set via config.yaml or --set teleport.clusterName=your-cluster-name
+  
+  # Teleport Kube Agent Configuration
+  kubeAgent:
+    roles: "kube,app"
+    labels:
+      env: dev
+      provider: kubernetes
+    
+    # Application Access Configuration
+    apps:
+      - name: kube-dashboard-admin
+        uri: ""  # Will be set to dashboard ClusterIP
+        insecure_skip_verify: true
+        labels:
+          env: dev
+          role: admin
+      
+      - name: kube-dashboard-readonly
+        uri: ""  # Will be set to dashboard ClusterIP
+        insecure_skip_verify: true
+        labels:
+          env: dev
+          role: readonly
+
