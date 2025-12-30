@@ -8,7 +8,7 @@ TELEPORT_JOIN_TOKEN ?= $(shell if [ -f config.yaml ]; then grep -A 1 "^teleport:
 TELEPORT_NAMESPACE ?= $(shell if [ -f config.yaml ]; then grep -A 1 "^teleport:" config.yaml | grep -A 1 "namespace:" | grep -v "^teleport:" | cut -d'"' -f2 | cut -d'"' -f1 || echo "teleport-agent"; fi)
 K8S_NAMESPACE ?= $(shell if [ -f config.yaml ]; then grep -A 1 "^kubernetes:" config.yaml | grep namespace | cut -d'"' -f2 | cut -d'"' -f1 || echo "kubernetes-dashboard"; fi)
 
-.PHONY: help config setup-minikube check-minikube start-minikube stop-minikube reset-minikube helm-deploy helm-clean helm-status get-tokens get-clusterip status logs
+.PHONY: help config setup-minikube check-minikube start-minikube stop-minikube reset-minikube helm-deploy helm-clean helm-status get-tokens get-clusterip status logs setup-teleport-local setup-teleport-enterprise start-teleport stop-teleport teleport-status teleport-logs
 
 # Default target
 help:
@@ -30,6 +30,21 @@ help:
 	@echo "  get-clusterip   - Get Dashboard ClusterIP"
 	@echo "  status         - Check deployment status"
 	@echo "  logs           - View Teleport agent logs"
+	@echo ""
+	@echo "Teleport Setup (if not using existing Teleport):"
+	@echo "  setup-teleport-local      - Setup Teleport Community Edition (local Docker for testing)"
+	@echo "  start-teleport            - Start Teleport Community Edition (local Docker)"
+	@echo "  stop-teleport             - Stop Teleport Docker container"
+	@echo "  teleport-status           - Check Teleport container status"
+	@echo "  teleport-logs             - View Teleport container logs (follow mode)"
+	@echo "  teleport-debug            - Debug Teleport container (status, logs, certs)"
+	@echo "  teleport-create-admin     - Create Teleport admin user (teleport-admin)"
+	@echo "  teleport-delete-admin     - Delete Teleport admin user (teleport-admin)"
+	@echo "  teleport-create-readonly  - Create Teleport readonly user (teleport-readonly)"
+	@echo "  teleport-delete-readonly  - Delete Teleport readonly user (teleport-readonly)"
+	@echo ""
+	@echo "  Note: For Enterprise features, use Teleport Cloud (14-day trial):"
+	@echo "        https://goteleport.com/signup/"
 	@echo ""
 	@echo "Quick Start:"
 	@echo "  1. make config  # Create config.yaml from example"
@@ -324,4 +339,119 @@ status:
 logs:
 	@echo "📋 Teleport Agent Logs:"
 	@kubectl logs -n $(TELEPORT_NAMESPACE) -l app=teleport-kube-agent --tail=50 || echo "  No logs found"
+
+# Setup Teleport Community Edition (local Docker - testing only)
+setup-teleport-local:
+	@echo "🚀 Setting up Teleport Community Edition (local Docker for testing)..."
+	@chmod +x scripts/setup-teleport-local.sh
+	@./scripts/setup-teleport-local.sh
+
+# Detect docker compose command (docker compose or docker-compose)
+DOCKER_COMPOSE := $(shell command -v docker-compose 2>/dev/null || echo "docker compose")
+
+# Start Teleport (Community Edition - local Docker)
+start-teleport:
+	@echo "🚀 Starting Teleport Community Edition (local Docker)..."
+	@$(DOCKER_COMPOSE) -f docker-compose.teleport.yml up -d
+	@echo "⏳ Waiting for Teleport to be ready (this may take 1-2 minutes for first-time installation)..."
+	@echo "   Installing Teleport (~194 MB download) and starting services..."
+	@sleep 30
+	@echo "📋 Checking Teleport status..."
+	@docker logs teleport --tail=20 2>/dev/null | grep -E "(✅|🚀|ERROR|error|Teleport|started)" || echo "   Still installing/starting..."
+	@echo ""
+	@echo "✅ Container started! Teleport may still be installing/starting."
+	@echo "   Check logs with: make teleport-logs"
+	@echo "   Wait a bit longer if you see installation progress in logs."
+	@echo "📊 Access Teleport Web UI at: https://localhost:3080"
+	@echo ""
+	@echo "📋 Next steps:"
+	@echo "  1. Access https://localhost:3080 and accept terms"
+	@echo "  2. Create a user: docker exec -it teleport tctl users add teleport-admin --roles=editor,access"
+	@echo "  3. Update config.yaml with:"
+	@echo "     teleport.proxy_addr: \"localhost:3080\""
+	@echo "     teleport.cluster_name: \"localhost\""
+
+# Stop Teleport
+stop-teleport:
+	@echo "🛑 Stopping Teleport..."
+	@$(DOCKER_COMPOSE) -f docker-compose.teleport.yml down 2>/dev/null || true
+	@echo "✅ Teleport stopped!"
+
+# Clean Teleport config (if corrupted)
+clean-teleport-config:
+	@echo "🧹 Cleaning Teleport config..."
+	@rm -f teleport-config/teleport.yaml
+	@echo "✅ Config cleaned. Restart with: make start-teleport"
+
+# Check Teleport status
+teleport-status:
+	@echo "📊 Teleport Container Status:"
+	@docker ps --filter "name=teleport" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" || echo "  Teleport not running"
+
+# View Teleport logs (follow mode - press Ctrl-C to exit)
+teleport-logs:
+	@echo "📋 Teleport Container Logs (following - press Ctrl-C to exit):"
+	@echo ""
+	@docker logs -f teleport 2>/dev/null || docker logs -f teleport-enterprise 2>/dev/null || echo "  Teleport container not found"
+
+# Create Teleport admin user
+teleport-create-admin:
+	@echo "👤 Creating Teleport admin user..."
+	@echo ""
+	@OUTPUT=$$(docker exec teleport tctl users add teleport-admin --roles=editor,access --logins=root,ubuntu,ec2-user 2>&1 || docker exec teleport-enterprise tctl users add teleport-admin --roles=editor,access --logins=root,ubuntu,ec2-user 2>&1); \
+	if [ $$? -eq 0 ]; then \
+		echo "$$OUTPUT" | sed 's|https://localhost:443|https://localhost:3080|g'; \
+		echo ""; \
+		echo "✅ User created! Use the URL above (with port 3080) to complete setup."; \
+	else \
+		echo "$$OUTPUT"; \
+		echo "❌ Failed to create user. Is Teleport container running?"; \
+	fi
+
+# Delete Teleport admin user
+teleport-delete-admin:
+	@echo "🗑️  Deleting Teleport admin user..."
+	@echo ""
+	@docker exec teleport tctl users rm teleport-admin 2>&1 || docker exec teleport-enterprise tctl users rm teleport-admin 2>&1 || \
+		(echo "⚠️  User may not exist or container not running. Continuing..." && exit 0)
+	@echo "✅ User deleted (if it existed)"
+
+# Create Teleport readonly user
+teleport-create-readonly:
+	@echo "👤 Creating Teleport readonly user..."
+	@echo ""
+	@OUTPUT=$$(docker exec teleport tctl users add teleport-readonly --roles=access --logins=root,ubuntu,ec2-user 2>&1 || docker exec teleport-enterprise tctl users add teleport-readonly --roles=access --logins=root,ubuntu,ec2-user 2>&1); \
+	if [ $$? -eq 0 ]; then \
+		echo "$$OUTPUT" | sed 's|https://localhost:443|https://localhost:3080|g'; \
+		echo ""; \
+		echo "✅ Readonly user created! Use the URL above (with port 3080) to complete setup."; \
+		echo "   Note: This user has 'access' role only (read-only permissions)."; \
+	else \
+		echo "$$OUTPUT"; \
+		echo "❌ Failed to create user. Is Teleport container running?"; \
+	fi
+
+# Delete Teleport readonly user
+teleport-delete-readonly:
+	@echo "🗑️  Deleting Teleport readonly user..."
+	@echo ""
+	@docker exec teleport tctl users rm teleport-readonly 2>&1 || docker exec teleport-enterprise tctl users rm teleport-readonly 2>&1 || \
+		(echo "⚠️  User may not exist or container not running. Continuing..." && exit 0)
+	@echo "✅ User deleted (if it existed)"
+
+# Debug Teleport container
+teleport-debug:
+	@echo "🔍 Teleport Container Debug Info:"
+	@echo ""
+	@echo "Container Status:"
+	@docker ps -a --filter "name=teleport" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null || echo "  Cannot access Docker"
+	@echo ""
+	@echo "Recent Logs:"
+	@docker logs teleport --tail=50 2>/dev/null || docker logs teleport-enterprise --tail=50 2>/dev/null || echo "  No logs available"
+	@echo ""
+	@echo "Certificate Check:"
+	@ls -la teleport-tls/ 2>/dev/null || echo "  teleport-tls directory not found"
+	@echo ""
+	@echo "Config Check:"
+	@ls -la teleport-config/ 2>/dev/null || echo "  teleport-config directory not found"
 

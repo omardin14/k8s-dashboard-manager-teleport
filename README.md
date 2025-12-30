@@ -13,6 +13,8 @@ A complete Kubernetes solution that deploys the Kubernetes Dashboard and makes i
 - [Features](#-features)
 - [Prerequisites](#-prerequisites)
 - [Teleport Setup](#-teleport-setup)
+  - [Option A: Using Existing Teleport](#option-a-using-existing-teleport)
+  - [Option B: Deploying Teleport Locally](#option-b-deploying-teleport-locally)
 - [Architecture](#-architecture)
 - [Deployment](#-deployment)
 - [Accessing the Dashboard](#-accessing-the-dashboard)
@@ -29,12 +31,16 @@ A complete Kubernetes solution that deploys the Kubernetes Dashboard and makes i
 ### Prerequisites
 
 - Kubernetes cluster (minikube, EKS, GKE, AKS, etc.)
-- Teleport tenant/instance configured
 - `kubectl` configured to access your cluster
 - `helm` installed (v3.x)
-- Access to Teleport tenant to generate join tokens
+- `docker` and `docker-compose` installed (if deploying Teleport locally)
+- **Either:**
+  - Existing Teleport tenant/instance configured, OR
+  - Deploy Teleport Community/Enterprise Edition using this project
 
 ### Fastest Deployment
+
+**Option A: Using Existing Teleport**
 
 **1. Setup Configuration:**
 ```bash
@@ -61,16 +67,46 @@ make setup-minikube
 make helm-deploy
 ```
 
-**4. Get Tokens:**
+**Option B: Deploy Teleport Locally (Community Edition)**
+
+**1. Setup Teleport Community Edition:**
 ```bash
-make get-tokens
+# Setup Teleport Community Edition (local Docker)
+make setup-teleport-local
+
+# Start Teleport
+make start-teleport
+
+# Create Teleport user
+docker exec -it teleport tctl users add teleport-admin --roles=editor,access
+
+# Follow the invitation URL to complete user setup
 ```
 
-**5. Access via Teleport:**
-- Log into Teleport web UI
-- Go to Applications
-- Click on `kube-dashboard-admin` or `kube-dashboard-readonly`
-- Paste the appropriate token when prompted
+**2. Setup Configuration:**
+```bash
+# Create config file
+make config
+
+# Edit config.yaml:
+# - teleport.proxy_addr: "localhost:3080"
+# - teleport.cluster_name: "localhost"
+
+# Generate join token
+make generate-token
+```
+
+**3. Deploy Dashboard:**
+```bash
+make setup-minikube
+make helm-deploy
+```
+
+**4. Get Tokens and Access:**
+```bash
+make get-tokens
+# Access via Teleport Web UI at https://localhost:3080
+```
 
 ---
 
@@ -101,17 +137,156 @@ make get-tokens
 
 ### Required
 - **Kubernetes Cluster**: Any Kubernetes distribution (minikube, EKS, GKE, AKS, etc.)
-- **Teleport Tenant**: Active Teleport instance (Cloud or self-hosted)
 - **kubectl**: Configured to access your cluster
 - **helm**: Version 3.x installed
 
-### Optional
+### Optional (Choose One)
+- **Existing Teleport**: Active Teleport instance (Cloud or self-hosted)
+- **OR Docker + Docker Compose**: For deploying Teleport locally
 - **minikube**: For local development/testing
-- **tctl**: Teleport CLI tool (for generating join tokens)
+- **tctl**: Teleport CLI tool (for generating join tokens automatically)
+- **mkcert**: For local certificate generation (auto-installed on macOS)
 
 ---
 
 ## 🔧 Teleport Setup
+
+This project supports three scenarios:
+1. **Using Teleport Cloud** (Recommended): Connect to Teleport Cloud (14-day free trial)
+2. **Using Existing Teleport**: Connect to your existing self-hosted Teleport instance
+3. **Deploying Teleport Locally**: Deploy Teleport Community Edition using Docker (testing only)
+
+### Option A: Using Teleport Cloud (Recommended)
+
+**Best for:** Production deployments, testing Enterprise features
+
+1. **Sign up for Teleport Cloud:**
+   - Visit [https://goteleport.com/signup/](https://goteleport.com/signup/)
+   - Create your account (14-day free trial)
+   - Complete the setup wizard
+
+2. **Get your Teleport Proxy Address:**
+   - After signup, you'll receive your Teleport proxy address
+   - It will look like: `your-tenant.teleport.sh:443` or `teleport.example.com:443`
+
+3. **Update config.yaml:**
+   ```yaml
+   teleport:
+     proxy_addr: "your-tenant.teleport.sh:443"  # Your Teleport Cloud proxy
+     cluster_name: "your-tenant.teleport.sh"    # Your Teleport Cloud cluster
+   ```
+
+4. **Skip to [Step 1: Create Teleport Join Token](#step-1-create-teleport-join-token)**
+
+### Option B: Using Existing Teleport
+
+If you already have a self-hosted Teleport instance, skip to [Step 1: Create Teleport Join Token](#step-1-create-teleport-join-token).
+
+### Option C: Deploying Teleport Locally (Testing Only)
+
+#### Teleport Community Edition (Local Docker - Testing Only)
+
+Deploy Teleport Community Edition locally using Docker. This is perfect for testing and development.
+
+**Prerequisites:**
+- Docker and Docker Compose installed
+- `mkcert` installed (for local certificates) - will be installed automatically on macOS
+
+**Setup Steps:**
+
+1. **Setup Teleport Community Edition:**
+   ```bash
+   make setup-teleport-local
+   ```
+   
+   This will:
+   - Install `mkcert` if needed (macOS)
+   - Create local certificate authority
+   - Generate TLS certificates for localhost
+   - Prepare Docker configuration
+
+2. **Start Teleport:**
+   ```bash
+   make start-teleport
+   ```
+   
+   Or manually:
+   ```bash
+   docker-compose -f docker-compose.teleport.yml up -d
+   ```
+
+3. **Access Teleport Web UI:**
+   - Open https://localhost:3080
+   - Accept the terms of Teleport Community Edition
+
+4. **Create a Teleport User:**
+   ```bash
+   docker exec -it teleport tctl users add teleport-admin --roles=editor,access --logins=root,ubuntu,ec2-user
+   ```
+   
+   This will output an invitation URL. Visit it to complete user setup.
+
+5. **Configure MFA:**
+   - Enroll an OTP authenticator (Google Authenticator, Authy, etc.)
+   - Complete the user setup
+
+6. **Update config.yaml:**
+   ```yaml
+   teleport:
+     proxy_addr: "localhost:3080"
+     cluster_name: "localhost"
+   ```
+
+7. **Generate Join Token:**
+   ```bash
+   make generate-token
+   ```
+
+**Reference:** [Teleport Community Edition Setup Guide](https://goteleport.com/docs/get-started/deploy-community/)
+
+#### Teleport Enterprise / Cloud (Recommended for Production)
+
+For production deployments or advanced features, use **Teleport Cloud** (14-day free trial).
+
+**Prerequisites:**
+- Sign up for Teleport Cloud: [https://goteleport.com/signup/](https://goteleport.com/signup/)
+
+**Setup Steps:**
+
+1. **Sign up for Teleport Cloud:**
+   - Visit [https://goteleport.com/signup/](https://goteleport.com/signup/)
+   - Create your account (14-day free trial)
+   - Complete the setup wizard
+
+2. **Get your Teleport Proxy Address:**
+   - After signup, you'll receive your Teleport proxy address
+   - It will look like: `your-tenant.teleport.sh:443` or `teleport.example.com:443`
+
+3. **Update config.yaml:**
+   ```yaml
+   teleport:
+     proxy_addr: "your-tenant.teleport.sh:443"  # Your Teleport Cloud proxy
+     cluster_name: "your-tenant.teleport.sh"    # Your Teleport Cloud cluster
+   ```
+
+4. **Generate Join Token:**
+   - Use the Teleport Cloud Web UI to generate a join token
+   - Or use `tctl` if you have it configured to connect to your Teleport Cloud instance
+   ```bash
+   make generate-token
+   ```
+
+5. **Deploy Dashboard:**
+   ```bash
+   make helm-deploy
+   ```
+
+**Benefits of Teleport Cloud:**
+- No infrastructure to manage
+- Automatic updates and maintenance
+- Enterprise features included
+- 14-day free trial
+- Easy scaling
 
 ### Step 1: Create Teleport Join Token
 
@@ -434,6 +609,60 @@ You can also set these via environment variables:
 
 ## 🐛 Troubleshooting
 
+### Teleport Web UI Not Accessible
+
+If you can't access `https://localhost:3080`, check the following:
+
+1. **Check Container Status:**
+   ```bash
+   make teleport-status
+   # or
+   docker ps -a | grep teleport
+   ```
+
+2. **View Container Logs:**
+   ```bash
+   make teleport-logs
+   # or
+   docker logs teleport --tail=100
+   ```
+
+3. **Debug Information:**
+   ```bash
+   make teleport-debug
+   ```
+
+4. **Common Issues:**
+   - **"Page can't open" / "Connection refused"**: 
+     - **First-time installation**: Teleport needs to download ~194 MB and install. Wait 2-3 minutes after `make start-teleport`, then check logs with `make teleport-logs`
+     - Look for "✅ Teleport installed" and "🚀 Starting Teleport..." in logs
+     - Once you see "Teleport started" or similar, the service should be ready
+     - Container might still be installing - check with `docker ps` (should show "Up" status)
+   - **Container keeps restarting**: Check logs for certificate errors. Ensure `teleport-tls/localhost.pem` and `teleport-tls/localhost-key.pem` exist.
+   - **Certificate errors in browser**: Make sure mkcert CA is installed (`mkcert -install`) and certificates are in `teleport-tls/`.
+   - **Port already in use**: Another service might be using port 3080. Check with `lsof -i :3080`.
+   - **Still installing**: If logs show "Installing Teleport v18.6.0" or "Need to get 194 MB", wait for installation to complete (can take 2-3 minutes on slower connections).
+
+5. **Restart Teleport:**
+   ```bash
+   make stop-teleport
+   make start-teleport
+   ```
+
+6. **Verify Certificates:**
+   ```bash
+   ls -la teleport-tls/
+   # Should show: localhost.pem, localhost-key.pem, rootCA.pem
+   ```
+
+7. **Re-run Setup:**
+   ```bash
+   make setup-teleport-local
+   make start-teleport
+   ```
+
+### Other Issues
+
 ### Dashboard Not Appearing in Teleport
 
 **Issue**: Applications don't show up in Teleport web UI
@@ -544,10 +773,12 @@ kubectl delete namespace kubernetes-dashboard
 ## 📚 Reference
 
 - **Teleport Application Access Guide**: [https://github.com/gravitational/teleport/discussions/31811](https://github.com/gravitational/teleport/discussions/31811)
+- **Teleport Community Edition Setup**: [https://goteleport.com/docs/get-started/deploy-community/](https://goteleport.com/docs/get-started/deploy-community/)
 - **Kubernetes Dashboard**: [https://github.com/kubernetes/dashboard](https://github.com/kubernetes/dashboard)
 - **Teleport Documentation**: [https://goteleport.com/docs/](https://goteleport.com/docs/)
 - **Teleport Kube Agent Chart**: [https://artifacthub.io/packages/helm/teleport/teleport-kube-agent](https://artifacthub.io/packages/helm/teleport/teleport-kube-agent)
 - **Kubernetes Dashboard Chart**: [https://artifacthub.io/packages/helm/k8s-dashboard/kubernetes-dashboard](https://artifacthub.io/packages/helm/k8s-dashboard/kubernetes-dashboard)
+- **Teleport Enterprise**: [https://goteleport.com/pricing/](https://goteleport.com/pricing/)
 
 ---
 
