@@ -70,66 +70,64 @@ config:
 # Generate Teleport join token
 generate-token:
 	@echo "🔑 Generating Teleport join token..."
-	@if [ ! -f config.yaml ]; then \
-		echo "❌ config.yaml not found. Run 'make config' first"; \
+	@# Check if tctl is available (either on host or in container) and generate token
+	@sh -c '\
+	if command -v tctl >/dev/null 2>&1; then \
+		echo "✅ Using tctl from host system..."; \
+		TOKEN_OUTPUT=$$(tctl tokens add --type=kube,app --ttl=24h 2>&1); \
+		TOKEN_EXIT=$$?; \
+	elif docker ps --filter "name=teleport" --format "{{.Names}}" | grep -q teleport; then \
+		echo "✅ Using tctl from Teleport container..."; \
+		TOKEN_OUTPUT=$$(docker exec teleport tctl tokens add --type=kube,app --ttl=24h 2>&1); \
+		TOKEN_EXIT=$$?; \
+	elif docker ps --filter "name=teleport-enterprise" --format "{{.Names}}" | grep -q teleport-enterprise; then \
+		echo "✅ Using tctl from Teleport Enterprise container..."; \
+		TOKEN_OUTPUT=$$(docker exec teleport-enterprise tctl tokens add --type=kube,app --ttl=24h 2>&1); \
+		TOKEN_EXIT=$$?; \
+	else \
+		echo "⚠️  tctl not found and Teleport container not running."; \
+		echo ""; \
+		echo "Please either:"; \
+		echo "  1. Start Teleport: make start-teleport"; \
+		echo "  2. Or install tctl on your host: https://goteleport.com/docs/installation/"; \
+		echo "  3. Or generate token manually via Teleport Web UI"; \
 		exit 1; \
-	fi
-	@if ! command -v tctl >/dev/null 2>&1; then \
-		echo "⚠️  tctl not found. Cannot auto-generate token."; \
+	fi; \
+	if [ $$TOKEN_EXIT -ne 0 ]; then \
+		echo "❌ Failed to generate token:"; \
+		echo "$$TOKEN_OUTPUT"; \
 		echo ""; \
 		echo "Please generate token manually:"; \
 		echo "  1. Via Teleport Web UI: Settings → Authentication → Tokens → Add Token"; \
 		echo "     - Token Type: Kubernetes + Application"; \
-		echo "     - Copy the generated token"; \
-		echo "  2. Or install tctl and configure it: https://goteleport.com/docs/installation/"; \
-		echo ""; \
-		echo "Then update config.yaml with: teleport.join_token: \"YOUR_TOKEN\""; \
+		echo "  2. Or run: docker exec teleport tctl tokens add --type=kube,app --ttl=24h"; \
 		exit 1; \
-	fi
-	@echo "📝 Checking tctl configuration..."
-	@if ! tctl status >/dev/null 2>&1; then \
-		echo "⚠️  tctl is not configured or cannot connect to Teleport cluster"; \
+	fi; \
+	TOKEN=$$(echo "$$TOKEN_OUTPUT" | grep -oE "[a-z0-9]{32}" | head -1); \
+	if [ -z "$$TOKEN" ]; then \
+		TOKEN=$$(echo "$$TOKEN_OUTPUT" | grep -i "token" | grep -oE "[a-z0-9]{32}" | head -1); \
+	fi; \
+	if [ -z "$$TOKEN" ]; then \
+		echo "⚠️  Could not extract token from output. Showing full output:"; \
+		echo "$$TOKEN_OUTPUT"; \
 		echo ""; \
-		echo "Please configure tctl:"; \
-		echo "  1. Set TELEPORT environment variables, or"; \
-		echo "  2. Configure ~/.tsh/config.yaml, or"; \
-		echo "  3. Generate token manually via Teleport Web UI"; \
-		echo ""; \
-		echo "Then update config.yaml with: teleport.join_token: \"YOUR_TOKEN\""; \
+		echo "Please manually extract the token (32 character string) and add to config.yaml"; \
 		exit 1; \
-	fi
-	@echo "🔧 Generating join token with tctl..."
-	@TOKEN_NAME="kube-dashboard-$$(date +%s)"; \
-	TOKEN_OUTPUT=$$(tctl tokens add --type=kube,app --ttl=24h "$$TOKEN_NAME" 2>&1); \
-	if [ $$? -eq 0 ]; then \
-		TOKEN=$$(echo "$$TOKEN_OUTPUT" | grep -oE '[a-z0-9]{32}' | head -1); \
-		if [ -z "$$TOKEN" ]; then \
-			TOKEN=$$(echo "$$TOKEN_OUTPUT" | grep -i "token" | grep -oE '[a-z0-9]{32}' | head -1); \
-		fi; \
-		if [ -n "$$TOKEN" ]; then \
-			echo "✅ Generated token: $$TOKEN"; \
-			if [ "$$(uname)" = "Darwin" ]; then \
-				sed -i '' "s/join_token:.*/join_token: \"$$TOKEN\"/" config.yaml; \
-			else \
-				sed -i "s/join_token:.*/join_token: \"$$TOKEN\"/" config.yaml; \
-			fi; \
-			echo "✅ Updated config.yaml with generated token"; \
-			echo "⚠️  Token expires in 24 hours. For production, use longer TTL or rotate regularly."; \
+	fi; \
+	echo "✅ Generated token: $$TOKEN"; \
+	if [ -f config.yaml ]; then \
+		if [ "$(shell uname)" = "Darwin" ]; then \
+			sed -i "" "s/join_token:.*/join_token: \"$$TOKEN\"/" config.yaml; \
 		else \
-			echo "⚠️  Could not extract token from tctl output"; \
-			echo "Output: $$TOKEN_OUTPUT"; \
-			echo ""; \
-			echo "Please copy the token manually and update config.yaml"; \
-			exit 1; \
+			sed -i "s/join_token:.*/join_token: \"$$TOKEN\"/" config.yaml; \
 		fi; \
+		echo "✅ Updated config.yaml with join token"; \
+		echo "⚠️  Token expires in 24 hours. For production, use longer TTL or rotate regularly."; \
 	else \
-		echo "❌ Failed to generate token: $$TOKEN_OUTPUT"; \
-		echo ""; \
-		echo "Please generate token manually:"; \
-		echo "  1. Via Teleport Web UI: Settings → Authentication → Tokens"; \
-		echo "  2. Or check tctl configuration"; \
-		exit 1; \
-	fi
+		echo "⚠️  config.yaml not found. Token generated but not saved:"; \
+		echo "   $$TOKEN"; \
+		echo "   Please add to config.yaml: teleport.join_token: \"$$TOKEN\""; \
+	fi'
 
 # Check if minikube is installed
 check-minikube:
