@@ -33,14 +33,51 @@ A complete Kubernetes solution that deploys the Kubernetes Dashboard and makes i
 - Kubernetes cluster (minikube, EKS, GKE, AKS, etc.)
 - `kubectl` configured to access your cluster
 - `helm` installed (v3.x)
-- `docker` and `docker-compose` installed (if deploying Teleport locally)
 - **Either:**
   - Existing Teleport tenant/instance configured, OR
-  - Deploy Teleport Community/Enterprise Edition using this project
+  - Deploy Teleport Community Edition in Kubernetes (automated by `make helm-deploy`)
 
-### Fastest Deployment
+### Fastest Deployment (Automated - Recommended)
 
-**Option A: Using Existing Teleport**
+**For local testing with minikube, everything is automated in one command:**
+
+```bash
+# 1. Create config file (optional - defaults work for local testing)
+make config
+
+# 2. Setup minikube
+make setup-minikube
+
+# 3. Deploy everything (one command does it all!)
+make helm-deploy
+```
+
+**That's it!** The `make helm-deploy` command automatically:
+1. ✅ Deploys Teleport server to Kubernetes
+2. ✅ Creates admin user (if needed)
+3. ✅ Generates join token
+4. ✅ Starts port-forward to `localhost:3080`
+5. ✅ Deploys Kubernetes Dashboard
+6. ✅ Deploys Teleport agent
+
+**Next steps:**
+- Access Teleport Web UI: https://localhost:3080
+- Reset admin password (if needed):
+  ```bash
+  POD=$(kubectl -n teleport get pods -l app=teleport,component=server -o jsonpath='{.items[0].metadata.name}')
+  kubectl exec -n teleport $POD -- tctl users reset admin
+  ```
+- Get dashboard tokens: `make get-tokens`
+- Access dashboard via Teleport: Applications → kube-dashboard
+
+**To clean up everything:**
+```bash
+make helm-clean
+```
+
+### Option A: Using Existing Teleport
+
+If you already have a Teleport instance (Cloud or self-hosted):
 
 **1. Setup Configuration:**
 ```bash
@@ -48,8 +85,8 @@ A complete Kubernetes solution that deploys the Kubernetes Dashboard and makes i
 make config
 
 # Edit config.yaml with your Teleport proxy and cluster name:
-# - teleport.proxy_addr
-# - teleport.cluster_name
+# - teleport.proxy_addr: "your-proxy.teleport.sh:443"
+# - teleport.cluster_name: "your-cluster-name"
 
 # Generate join token automatically (requires tctl)
 make generate-token
@@ -64,41 +101,6 @@ make setup-minikube
 
 **3. Deploy:**
 ```bash
-make helm-deploy
-```
-
-**Option B: Deploy Teleport Locally (Community Edition)**
-
-**1. Setup Teleport Community Edition:**
-```bash
-# Setup Teleport Community Edition (local Docker)
-make setup-teleport-local
-
-# Start Teleport
-make start-teleport
-
-# Create Teleport user
-docker exec -it teleport tctl users add teleport-admin --roles=editor,access
-
-# Follow the invitation URL to complete user setup
-```
-
-**2. Setup Configuration:**
-```bash
-# Create config file
-make config
-
-# Edit config.yaml:
-# - teleport.proxy_addr: "localhost:3080"
-# - teleport.cluster_name: "localhost"
-
-# Generate join token
-make generate-token
-```
-
-**3. Deploy Dashboard:**
-```bash
-make setup-minikube
 make helm-deploy
 ```
 
@@ -142,10 +144,9 @@ make get-tokens
 
 ### Optional (Choose One)
 - **Existing Teleport**: Active Teleport instance (Cloud or self-hosted)
-- **OR Docker + Docker Compose**: For deploying Teleport locally
+- **Kubernetes**: For deploying Teleport in-cluster (recommended)
 - **minikube**: For local development/testing
 - **tctl**: Teleport CLI tool (for generating join tokens automatically)
-- **mkcert**: For local certificate generation (auto-installed on macOS)
 
 ---
 
@@ -154,7 +155,7 @@ make get-tokens
 This project supports three scenarios:
 1. **Using Teleport Cloud** (Recommended): Connect to Teleport Cloud (14-day free trial)
 2. **Using Existing Teleport**: Connect to your existing self-hosted Teleport instance
-3. **Deploying Teleport Locally**: Deploy Teleport Community Edition using Docker (testing only)
+3. **Deploying Teleport in Kubernetes**: Deploy Teleport Community Edition in-cluster (recommended for local testing)
 
 ### Option A: Using Teleport Cloud (Recommended)
 
@@ -182,67 +183,73 @@ This project supports three scenarios:
 
 If you already have a self-hosted Teleport instance, skip to [Step 1: Create Teleport Join Token](#step-1-create-teleport-join-token).
 
-### Option C: Deploying Teleport Locally (Testing Only)
+### Option C: Deploying Teleport in Kubernetes (Recommended for Local Testing)
 
-#### Teleport Community Edition (Local Docker - Testing Only)
-
-Deploy Teleport Community Edition locally using Docker. This is perfect for testing and development.
+Deploy Teleport Community Edition directly in your Kubernetes cluster. This solves networking issues and is perfect for testing and development.
 
 **Prerequisites:**
-- Docker and Docker Compose installed
-- `mkcert` installed (for local certificates) - will be installed automatically on macOS
+- Minikube or a Kubernetes cluster running
+- `kubectl` configured to access your cluster
 
 **Setup Steps:**
 
-1. **Setup Teleport Community Edition:**
+1. **Deploy Teleport Server to Kubernetes:**
    ```bash
-   make setup-teleport-local
+   make deploy-teleport
    ```
    
    This will:
-   - Install `mkcert` if needed (macOS)
-   - Create local certificate authority
-   - Generate TLS certificates for localhost
-   - Prepare Docker configuration
+   - Add the official Teleport Helm repository
+   - Create the `teleport-cluster` namespace
+   - Deploy Teleport using the official `teleport-cluster` Helm chart
+   - Deploy separate Auth Service and Proxy Service pods
+   - Configure for local testing (ClusterIP service, no ACME/Let's Encrypt)
+   - Wait for Teleport to be ready
+   
+   **Reference:** [Official Teleport Kubernetes Deployment Guide](https://goteleport.com/docs/zero-trust-access/deploy-a-cluster/helm-deployments/kubernetes-cluster/)
 
-2. **Start Teleport:**
+2. **Port-forward to Access Teleport Web UI:**
+   
+   In a separate terminal, run:
    ```bash
-   make start-teleport
+   make teleport-port-forward
    ```
    
-   Or manually:
-   ```bash
-   docker-compose -f docker-compose.teleport.yml up -d
-   ```
+   This forwards `localhost:3080` to the Teleport service in Kubernetes.
 
 3. **Access Teleport Web UI:**
-   - Open https://localhost:3080
+   - Open https://localhost:3080 in your browser
+   - Accept the self-signed certificate warning (for local testing)
    - Accept the terms of Teleport Community Edition
 
 4. **Create a Teleport User:**
    ```bash
-   docker exec -it teleport tctl users add teleport-admin --roles=editor,access --logins=root,ubuntu,ec2-user
+   make teleport-create-admin
    ```
    
-   This will output an invitation URL. Visit it to complete user setup.
-
-5. **Configure MFA:**
-   - Enroll an OTP authenticator (Google Authenticator, Authy, etc.)
-   - Complete the user setup
-
-6. **Update config.yaml:**
-   ```yaml
-   teleport:
-     proxy_addr: "localhost:3080"
-     cluster_name: "localhost"
+   This creates an admin user. To reset the password:
+   ```bash
+   POD=$(kubectl -n teleport-cluster get pods -l app.kubernetes.io/name=teleport-cluster,app.kubernetes.io/component=auth -o jsonpath='{.items[0].metadata.name}')
+   kubectl exec -n teleport-cluster $POD -- tctl users reset admin
    ```
 
-7. **Generate Join Token:**
+5. **Generate Join Token:**
    ```bash
    make generate-token
    ```
+   
+   This automatically generates a token and updates `config.yaml`.
 
-**Reference:** [Teleport Community Edition Setup Guide](https://goteleport.com/docs/get-started/deploy-community/)
+6. **Deploy Dashboard:**
+   ```bash
+   make helm-deploy
+   ```
+
+**Benefits of Kubernetes Deployment:**
+- No networking issues (Teleport and agents in the same cluster)
+- No need for `host.docker.internal` or certificate complications
+- More realistic deployment scenario
+- Easy cleanup with `make teleport-clean`
 
 #### Teleport Enterprise / Cloud (Recommended for Production)
 
@@ -613,52 +620,40 @@ You can also set these via environment variables:
 
 If you can't access `https://localhost:3080`, check the following:
 
-1. **Check Container Status:**
+1. **Check Teleport Status:**
    ```bash
    make teleport-status
-   # or
-   docker ps -a | grep teleport
    ```
 
-2. **View Container Logs:**
+2. **View Logs:**
    ```bash
-   make teleport-logs
-   # or
-   docker logs teleport --tail=100
+   make logs
+   # Select option 1 for Teleport Server logs
    ```
 
-3. **Debug Information:**
+3. **Check Port-Forward:**
    ```bash
-   make teleport-debug
+   # Check if port-forward is running
+   pgrep -f "kubectl port-forward.*teleport.*3080"
+   
+   # If not running, start it:
+   make teleport-port-forward
    ```
 
 4. **Common Issues:**
    - **"Page can't open" / "Connection refused"**: 
-     - **First-time installation**: Teleport needs to download ~194 MB and install. Wait 2-3 minutes after `make start-teleport`, then check logs with `make teleport-logs`
-     - Look for "✅ Teleport installed" and "🚀 Starting Teleport..." in logs
-     - Once you see "Teleport started" or similar, the service should be ready
-     - Container might still be installing - check with `docker ps` (should show "Up" status)
-   - **Container keeps restarting**: Check logs for certificate errors. Ensure `teleport-tls/localhost.pem` and `teleport-tls/localhost-key.pem` exist.
-   - **Certificate errors in browser**: Make sure mkcert CA is installed (`mkcert -install`) and certificates are in `teleport-tls/`.
-   - **Port already in use**: Another service might be using port 3080. Check with `lsof -i :3080`.
-   - **Still installing**: If logs show "Installing Teleport v18.6.0" or "Need to get 194 MB", wait for installation to complete (can take 2-3 minutes on slower connections).
+     - Port-forward might not be running. Start it with `make teleport-port-forward`
+     - Check if Teleport server pods are running: `kubectl get pods -n teleport-cluster`
+     - Wait for Teleport to be ready: `kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=teleport-cluster -n teleport-cluster`
+   - **Port already in use**: Another service might be using port 3080. Check with `lsof -i :3080` and stop the conflicting service.
+   - **Teleport pod not ready**: Check logs with `make logs` (option 1) to see what's wrong.
+   - **Certificate errors in browser**: For local testing, accept the self-signed certificate warning. This is expected for Kubernetes-deployed Teleport.
 
 5. **Restart Teleport:**
    ```bash
-   make stop-teleport
-   make start-teleport
-   ```
-
-6. **Verify Certificates:**
-   ```bash
-   ls -la teleport-tls/
-   # Should show: localhost.pem, localhost-key.pem, rootCA.pem
-   ```
-
-7. **Re-run Setup:**
-   ```bash
-   make setup-teleport-local
-   make start-teleport
+   make teleport-clean
+   make deploy-teleport
+   make teleport-port-forward
    ```
 
 ### Other Issues

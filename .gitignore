@@ -15,11 +15,3 @@ build/
 *.swo
 *~
 
-# Teleport data and config
-teleport-data/
-teleport-config/
-teleport-tls/
-teleport-license.pem
-*.pem
-*.key
-
