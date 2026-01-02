@@ -476,7 +476,7 @@ helm upgrade --install kubernetes-dashboard \
   --namespace kubernetes-dashboard
 
 # Get Dashboard ClusterIP
-export CLUSTER_IP=$(kubectl -n kubernetes-dashboard get svc kubernetes-dashboard \
+export CLUSTER_IP=$(kubectl -n kubernetes-dashboard get svc kubernetes-dashboard-kong-proxy \
   -o jsonpath="{.spec.clusterIP}")
 
 # Install Teleport Kube Agent

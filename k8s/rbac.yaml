@@ -20,11 +20,11 @@ subjects:
   name: dashboard-admin-account
   namespace: kubernetes-dashboard
 ---
-# Secret for Admin Token
+# Secret for Admin Token (matching documentation)
 apiVersion: v1
 kind: Secret
 metadata:
-  name: dashboard-admin-token
+  name: dashboard-token
   namespace: kubernetes-dashboard
   annotations:
     kubernetes.io/service-account.name: "dashboard-admin-account"

@@ -25,11 +25,11 @@ subjects:
   name: dashboard-admin-account
   namespace: {{ include "dashboard-teleport.namespace" . }}
 ---
-# Secret for Admin Token
+# Secret for Admin Token (matching documentation)
 apiVersion: v1
 kind: Secret
 metadata:
-  name: dashboard-admin-token
+  name: dashboard-token
   namespace: {{ include "dashboard-teleport.namespace" . }}
   labels:
     {{- include "dashboard-teleport.labels" . | nindent 4 }}
