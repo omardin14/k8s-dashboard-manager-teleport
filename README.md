@@ -2,19 +2,16 @@
 
 A complete Kubernetes solution that deploys the Kubernetes Dashboard and makes it accessible via Teleport Application Access with both admin and readonly access roles.
 
-![Status](https://img.shields.io/badge/status-ready-green)
+![Status](https://img.shields.io/badge/status-sandbox-yellow)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
----
+> ⚠️ **Note:** This setup is designed for local development/testing only. See the [Security](#-security) section for important security considerations.
 
 ## 📑 Table of Contents
 
 - [Quick Start](#-quick-start)
 - [Features](#-features)
 - [Prerequisites](#-prerequisites)
-- [Teleport Setup](#-teleport-setup)
-  - [Option A: Using Existing Teleport](#option-a-using-existing-teleport)
-  - [Option B: Deploying Teleport Locally](#option-b-deploying-teleport-locally)
 - [Architecture](#-architecture)
 - [Deployment](#-deployment)
 - [Accessing the Dashboard](#-accessing-the-dashboard)
@@ -22,7 +19,7 @@ A complete Kubernetes solution that deploys the Kubernetes Dashboard and makes i
 - [Security](#-security)
 - [Troubleshooting](#-troubleshooting)
 - [Cleanup](#-cleanup)
-- [Reference](#-reference)
+- [References](#-references)
 
 ---
 
@@ -30,84 +27,43 @@ A complete Kubernetes solution that deploys the Kubernetes Dashboard and makes i
 
 ### Prerequisites
 
-- Kubernetes cluster (minikube, EKS, GKE, AKS, etc.)
+- **Minikube** installed and running
 - `kubectl` configured to access your cluster
 - `helm` installed (v3.x)
-- **Either:**
-  - Existing Teleport tenant/instance configured, OR
-  - Deploy Teleport Community Edition in Kubernetes (automated by `make helm-deploy`)
+- **macOS/Linux** (for `/etc/hosts` modification)
 
 ### Fastest Deployment (Automated - Recommended)
 
 **For local testing with minikube, everything is automated in one command:**
 
 ```bash
-# 1. Create config file (optional - defaults work for local testing)
-make config
-
-# 2. Setup minikube
+# 1. Setup minikube (enables required addons)
 make setup-minikube
 
-# 3. Deploy everything (one command does it all!)
+# 2. Deploy everything (one command does it all!)
 make helm-deploy
 ```
 
 **That's it!** The `make helm-deploy` command automatically:
-1. ✅ Deploys Teleport server to Kubernetes
-2. ✅ Creates admin user (if needed)
-3. ✅ Generates join token
-4. ✅ Starts port-forward to `localhost:3080`
-5. ✅ Deploys Kubernetes Dashboard
-6. ✅ Deploys Teleport agent
+1. ✅ Checks prerequisites (minikube addons, DNS mappings)
+2. ✅ Deploys RBAC resources
+3. ✅ Deploys Teleport server to Kubernetes
+4. ✅ Creates admin user with Kubernetes access
+5. ✅ Generates join token
+6. ✅ Deploys Kubernetes Dashboard
+7. ✅ Deploys Teleport agent with discovery enabled
+8. ✅ Patches service to add port 8080
+9. ✅ Starts port-forward to `localhost:8080`
 
 **Next steps:**
-- Access Teleport Web UI: https://localhost:3080
-- Reset admin password (if needed):
-  ```bash
-  POD=$(kubectl -n teleport get pods -l app=teleport,component=server -o jsonpath='{.items[0].metadata.name}')
-  kubectl exec -n teleport $POD -- tctl users reset admin
-  ```
+- Access Teleport Web UI: `https://teleport-cluster.teleport-cluster.svc.cluster.local:8080`
+- Accept the admin invite URL shown in the summary
 - Get dashboard tokens: `make get-tokens`
-- Access dashboard via Teleport: Applications → kube-dashboard
+- Access dashboard via Teleport: Applications → dashboard
 
 **To clean up everything:**
 ```bash
 make helm-clean
-```
-
-### Option A: Using Existing Teleport
-
-If you already have a Teleport instance (Cloud or self-hosted):
-
-**1. Setup Configuration:**
-```bash
-# Create config file from example
-make config
-
-# Edit config.yaml with your Teleport proxy and cluster name:
-# - teleport.proxy_addr: "your-proxy.teleport.sh:443"
-# - teleport.cluster_name: "your-cluster-name"
-
-# Generate join token automatically (requires tctl)
-make generate-token
-
-# OR manually set teleport.join_token in config.yaml
-```
-
-**2. Setup Minikube (if using local cluster):**
-```bash
-make setup-minikube
-```
-
-**3. Deploy:**
-```bash
-make helm-deploy
-```
-
-**4. Get Tokens and Access:**
-```bash
-make get-tokens
-# Access via Teleport Web UI at https://localhost:3080
 ```
 
 ---
@@ -118,15 +74,16 @@ make get-tokens
 - Deploys official Kubernetes Dashboard via Helm
 - Latest stable version with all features
 - Secure ClusterIP service (not exposed publicly)
+- Automatic discovery via Teleport
 
 ### 🔐 Teleport Application Access
-- **Admin Access**: Full cluster-admin permissions via `kube-dashboard-admin` app
-- **Readonly Access**: Read-only permissions via `kube-dashboard-readonly` app
+- **Admin Access**: Full cluster-admin permissions via `dashboard` app
 - Secure access through Teleport proxy
 - No need to expose dashboard publicly
 - Single sign-on through Teleport
+- Automatic service discovery
 
-### 🛡️ Security
+### 🛡️ Security (Sandbox Only)
 - Two separate service accounts (admin and readonly)
 - Proper RBAC with ClusterRole and ClusterRoleBinding
 - Long-lived bearer tokens for dashboard authentication
@@ -138,233 +95,24 @@ make get-tokens
 ## 📋 Prerequisites
 
 ### Required
-- **Kubernetes Cluster**: Any Kubernetes distribution (minikube, EKS, GKE, AKS, etc.)
+- **Minikube**: For local development/testing
 - **kubectl**: Configured to access your cluster
 - **helm**: Version 3.x installed
+- **macOS/Linux**: For `/etc/hosts` modification
 
-### Optional (Choose One)
-- **Existing Teleport**: Active Teleport instance (Cloud or self-hosted)
-- **Kubernetes**: For deploying Teleport in-cluster (recommended)
-- **minikube**: For local development/testing
-- **tctl**: Teleport CLI tool (for generating join tokens automatically)
+### Minikube Addons
+The setup automatically enables:
+- `ingress` addon
+- `ingress-dns` addon
 
----
-
-## 🔧 Teleport Setup
-
-This project supports three scenarios:
-1. **Using Teleport Cloud** (Recommended): Connect to Teleport Cloud (14-day free trial)
-2. **Using Existing Teleport**: Connect to your existing self-hosted Teleport instance
-3. **Deploying Teleport in Kubernetes**: Deploy Teleport Community Edition in-cluster (recommended for local testing)
-
-### Option A: Using Teleport Cloud (Recommended)
-
-**Best for:** Production deployments, testing Enterprise features
-
-1. **Sign up for Teleport Cloud:**
-   - Visit [https://goteleport.com/signup/](https://goteleport.com/signup/)
-   - Create your account (14-day free trial)
-   - Complete the setup wizard
-
-2. **Get your Teleport Proxy Address:**
-   - After signup, you'll receive your Teleport proxy address
-   - It will look like: `your-tenant.teleport.sh:443` or `teleport.example.com:443`
-
-3. **Update config.yaml:**
-   ```yaml
-   teleport:
-     proxy_addr: "your-tenant.teleport.sh:443"  # Your Teleport Cloud proxy
-     cluster_name: "your-tenant.teleport.sh"    # Your Teleport Cloud cluster
-   ```
-
-4. **Skip to [Step 1: Create Teleport Join Token](#step-1-create-teleport-join-token)**
-
-### Option B: Using Existing Teleport
-
-If you already have a self-hosted Teleport instance, skip to [Step 1: Create Teleport Join Token](#step-1-create-teleport-join-token).
-
-### Option C: Deploying Teleport in Kubernetes (Recommended for Local Testing)
-
-Deploy Teleport Community Edition directly in your Kubernetes cluster. This solves networking issues and is perfect for testing and development.
-
-**Prerequisites:**
-- Minikube or a Kubernetes cluster running
-- `kubectl` configured to access your cluster
-
-**Setup Steps:**
-
-1. **Deploy Teleport Server to Kubernetes:**
-   ```bash
-   make deploy-teleport
-   ```
-   
-   This will:
-   - Add the official Teleport Helm repository
-   - Create the `teleport-cluster` namespace
-   - Deploy Teleport using the official `teleport-cluster` Helm chart
-   - Deploy separate Auth Service and Proxy Service pods
-   - Configure for local testing (ClusterIP service, no ACME/Let's Encrypt)
-   - Wait for Teleport to be ready
-   
-   **Reference:** [Official Teleport Kubernetes Deployment Guide](https://goteleport.com/docs/zero-trust-access/deploy-a-cluster/helm-deployments/kubernetes-cluster/)
-
-2. **Port-forward to Access Teleport Web UI:**
-   
-   In a separate terminal, run:
-   ```bash
-   make teleport-port-forward
-   ```
-   
-   This forwards `localhost:3080` to the Teleport service in Kubernetes.
-
-3. **Access Teleport Web UI:**
-   - Open https://localhost:3080 in your browser
-   - Accept the self-signed certificate warning (for local testing)
-   - Accept the terms of Teleport Community Edition
-
-4. **Create a Teleport User:**
-   ```bash
-   make teleport-create-admin
-   ```
-   
-   This creates an admin user. To reset the password:
-   ```bash
-   POD=$(kubectl -n teleport-cluster get pods -l app.kubernetes.io/name=teleport-cluster,app.kubernetes.io/component=auth -o jsonpath='{.items[0].metadata.name}')
-   kubectl exec -n teleport-cluster $POD -- tctl users reset admin
-   ```
-
-5. **Generate Join Token:**
-   ```bash
-   make generate-token
-   ```
-   
-   This automatically generates a token and updates `config.yaml`.
-
-6. **Deploy Dashboard:**
-   ```bash
-   make helm-deploy
-   ```
-
-**Benefits of Kubernetes Deployment:**
-- No networking issues (Teleport and agents in the same cluster)
-- No need for `host.docker.internal` or certificate complications
-- More realistic deployment scenario
-- Easy cleanup with `make teleport-clean`
-
-#### Teleport Enterprise / Cloud (Recommended for Production)
-
-For production deployments or advanced features, use **Teleport Cloud** (14-day free trial).
-
-**Prerequisites:**
-- Sign up for Teleport Cloud: [https://goteleport.com/signup/](https://goteleport.com/signup/)
-
-**Setup Steps:**
-
-1. **Sign up for Teleport Cloud:**
-   - Visit [https://goteleport.com/signup/](https://goteleport.com/signup/)
-   - Create your account (14-day free trial)
-   - Complete the setup wizard
-
-2. **Get your Teleport Proxy Address:**
-   - After signup, you'll receive your Teleport proxy address
-   - It will look like: `your-tenant.teleport.sh:443` or `teleport.example.com:443`
-
-3. **Update config.yaml:**
-   ```yaml
-   teleport:
-     proxy_addr: "your-tenant.teleport.sh:443"  # Your Teleport Cloud proxy
-     cluster_name: "your-tenant.teleport.sh"    # Your Teleport Cloud cluster
-   ```
-
-4. **Generate Join Token:**
-   - Use the Teleport Cloud Web UI to generate a join token
-   - Or use `tctl` if you have it configured to connect to your Teleport Cloud instance
-   ```bash
-   make generate-token
-   ```
-
-5. **Deploy Dashboard:**
-   ```bash
-   make helm-deploy
-   ```
-
-**Benefits of Teleport Cloud:**
-- No infrastructure to manage
-- Automatic updates and maintenance
-- Enterprise features included
-- 14-day free trial
-- Easy scaling
-
-### Step 1: Create Teleport Join Token
-
-You need to create a join token in your Teleport tenant that allows both `kube` and `app` roles.
-
-#### Option A: Automatic Generation (Recommended)
-
-If you have `tctl` installed and configured:
-
-```bash
-make generate-token
+### DNS Mappings
+The setup requires these entries in `/etc/hosts`:
+```
+127.0.0.1 teleport-cluster.teleport-cluster.svc.cluster.local
+127.0.0.1 dashboard.teleport-cluster.teleport-cluster.svc.cluster.local
 ```
 
-This will:
-1. Check if `tctl` is available and configured
-2. Generate a join token with 24-hour TTL
-3. Automatically update `config.yaml` with the token
-
-**Prerequisites for automatic generation:**
-- `tctl` installed: [Installation Guide](https://goteleport.com/docs/installation/)
-- `tctl` configured to connect to your Teleport cluster
-- Proper authentication/credentials
-
-#### Option B: Using Teleport Web UI
-
-1. Log into your Teleport web UI
-2. Go to **Settings** → **Authentication** → **Tokens**
-3. Click **Add Token**
-4. Set:
-   - **Token Type**: `Kubernetes` and `Application`
-   - **Token Name**: `kube-dashboard-token` (or any name)
-   - **TTL**: Set appropriate expiration (e.g., 1 hour for testing, longer for production)
-5. Click **Generate**
-6. **Copy the token** and update `config.yaml`:
-   ```yaml
-   teleport:
-     join_token: "your-token-here"
-   ```
-
-#### Option C: Using tctl Manually
-
-If you have `tctl` configured and access to your Teleport cluster:
-
-```bash
-tctl tokens add --type=kube,app --ttl=24h kube-dashboard-token
-```
-
-Then copy the token and update `config.yaml`.
-
-### Step 2: Configure Teleport Application Access
-
-The Teleport agent will automatically register two applications:
-- `kube-dashboard-admin` - For admin access
-- `kube-dashboard-readonly` - For readonly access
-
-These will appear in your Teleport web UI under **Applications** after deployment.
-
-### Step 3: Get Your Teleport Proxy Address
-
-Your Teleport proxy address is typically:
-- **Teleport Cloud**: `your-tenant.teleport.sh:443`
-- **Self-hosted**: `your-proxy-domain.com:443` or `your-proxy-ip:3080`
-
-You can find this in your Teleport web UI or in your Teleport configuration.
-
-### Step 4: Configure Cluster Name
-
-The cluster name should match what you've configured in Teleport. If this is a new cluster:
-1. Go to **Kubernetes** in Teleport web UI
-2. The cluster name will be shown there, or you can set a custom name
-3. Use this name in `config.yaml` as `teleport.cluster_name`
+The `make helm-deploy` command will check for these and fail if they're missing.
 
 ---
 
@@ -372,25 +120,38 @@ The cluster name should match what you've configured in Teleport. If this is a n
 
 The solution consists of:
 
-1. **Kubernetes Dashboard**: 
+1. **Teleport Cluster**: 
+   - Deployed via official Helm chart
+   - Runs in `teleport-cluster` namespace
+   - Web UI on port 8080, tunnel on port 443
+   - Self-signed certificates for local testing
+
+2. **Kubernetes Dashboard**: 
    - Deployed via official Helm chart
    - Runs in `kubernetes-dashboard` namespace
    - Exposed via ClusterIP service (internal only)
+   - Annotated for Teleport discovery
 
-2. **Teleport Kube Agent**:
+3. **Teleport Kube Agent**:
    - Deployed via Teleport Helm chart
    - Runs in `teleport-agent` namespace
    - Registers Kubernetes cluster with Teleport
-   - Registers two applications for dashboard access
+   - Discovers and registers dashboard application
+   - Roles: `kube,app,discovery`
 
-3. **RBAC Resources**:
+4. **RBAC Resources**:
    - `dashboard-admin-account`: ServiceAccount with cluster-admin role
    - `dashboard-readonly-account`: ServiceAccount with readonly ClusterRole
    - Tokens stored in Kubernetes Secrets
 
 ```
 ┌─────────────────────────────────────────┐
-│  Kubernetes Cluster                     │
+│  Kubernetes Cluster (Minikube)          │
+│  ┌───────────────────────────────────┐  │
+│  │  Teleport Cluster                 │  │
+│  │  - Auth Service                   │  │
+│  │  - Proxy Service (8080/443)        │  │
+│  └───────────────────────────────────┘  │
 │  ┌───────────────────────────────────┐  │
 │  │  Kubernetes Dashboard             │  │
 │  │  (ClusterIP Service)               │  │
@@ -398,20 +159,11 @@ The solution consists of:
 │  ┌───────────────────────────────────┐  │
 │  │  Teleport Kube Agent              │  │
 │  │  - Registers cluster              │  │
-│  │  - Registers applications         │  │
+│  │  - Discovers applications         │  │
 │  └───────────────────────────────────┘  │
 └─────────────────────────────────────────┘
            │
-           │ Teleport Protocol
-           │
-┌─────────────────────────────────────────┐
-│  Teleport Proxy                          │
-│  - Authentication                        │
-│  - Authorization                         │
-│  - Application Access                    │
-└─────────────────────────────────────────┘
-           │
-           │ HTTPS
+           │ Port Forward (8080:8080)
            │
 ┌─────────────────────────────────────────┐
 │  User Browser                            │
@@ -426,26 +178,23 @@ The solution consists of:
 
 ### Configuration Setup
 
-1. **Copy the example config:**
+The setup uses default values for local testing. You can customize via `config.yaml`:
+
 ```bash
+# Create config file (optional)
 make config
 ```
 
-2. **Edit `config.yaml` with your values:**
+Edit `config.yaml` if needed:
 ```yaml
 teleport:
-  proxy_addr: "your-tenant.teleport.sh:443"  # Your Teleport proxy
-  cluster_name: "my-k8s-cluster"             # Your cluster name in Teleport
-  join_token: "your-join-token-here"         # Token from Teleport
-  namespace: "teleport-agent"
+  namespace: "teleport-agent"  # Default: teleport-agent
 
 kubernetes:
-  namespace: "kubernetes-dashboard"
+  namespace: "kubernetes-dashboard"  # Default: kubernetes-dashboard
 ```
 
-3. **Note:** `config.yaml` is in `.gitignore` and will NOT be committed
-
-### Deploy with Helm (Recommended)
+### Automated Deployment
 
 ```bash
 # Deploy everything
@@ -453,48 +202,27 @@ make helm-deploy
 ```
 
 This will:
-1. Add required Helm repositories
-2. Install Kubernetes Dashboard
-3. Wait for Dashboard service to be ready
-4. Get Dashboard ClusterIP
-5. Install Teleport Kube Agent with application access configured
+1. Check prerequisites (minikube addons, DNS mappings)
+2. Deploy RBAC resources
+3. Deploy Teleport cluster with:
+   - `clusterName: minikube`
+   - `proxyListenerMode: multiplex`
+   - `publicAddr: teleport-cluster.teleport-cluster.svc.cluster.local:8080`
+   - `tunnelPublicAddr: teleport-cluster.teleport-cluster.svc.cluster.local:443`
+   - `extraArgs: ["--insecure"]`
+4. Create admin user with `k8s-admin` role
+5. Generate join token with `kube,app,discovery` roles
+6. Deploy Kubernetes Dashboard
+7. Annotate dashboard service for Teleport discovery
+8. Deploy Teleport Kube Agent with:
+   - `roles: kube,app,discovery`
+   - `insecureSkipProxyTLSVerify: true`
+   - Discovery configuration
+9. Patch Teleport service to add port 8080
+10. Restart agent pods
+11. Start port-forward to `localhost:8080`
 
-### Manual Deployment
-
-If you prefer to deploy manually:
-
-```bash
-# Add Helm repositories
-helm repo add kubernetes-dashboard https://kubernetes.github.io/dashboard
-helm repo add teleport https://charts.releases.teleport.dev
-helm repo update
-
-# Install Kubernetes Dashboard
-helm upgrade --install kubernetes-dashboard \
-  kubernetes-dashboard/kubernetes-dashboard \
-  --create-namespace \
-  --namespace kubernetes-dashboard
-
-# Get Dashboard ClusterIP
-export CLUSTER_IP=$(kubectl -n kubernetes-dashboard get svc kubernetes-dashboard-kong-proxy \
-  -o jsonpath="{.spec.clusterIP}")
-
-# Install Teleport Kube Agent
-helm upgrade --install teleport-kube-agent \
-  teleport/teleport-kube-agent \
-  --create-namespace \
-  --namespace teleport-agent \
-  --set authToken=YOUR_JOIN_TOKEN \
-  --set proxyAddr=your-proxy.teleport.com:443 \
-  --set kubeClusterName=your-cluster-name \
-  --set roles=kube,app \
-  --set apps[0].name=kube-dashboard-admin \
-  --set apps[0].uri=https://$CLUSTER_IP \
-  --set apps[0].insecure_skip_verify=true \
-  --set apps[1].name=kube-dashboard-readonly \
-  --set apps[1].uri=https://$CLUSTER_IP \
-  --set apps[1].insecure_skip_verify=true
-```
+**Note:** Step 2 (Teleport deployment) may take up to 5 minutes while the Helm chart deploys and pods become ready.
 
 ---
 
@@ -512,27 +240,29 @@ This will display:
 
 ### Step 2: Access via Teleport
 
-1. **Log into Teleport Web UI**
-   - Go to your Teleport tenant URL
-   - Authenticate with your credentials
+1. **Access Teleport Web UI**
+   - URL: `https://teleport-cluster.teleport-cluster.svc.cluster.local:8080`
+   - Accept the self-signed certificate warning (expected for local testing)
 
-2. **Navigate to Applications**
+2. **Accept Admin Invite**
+   - Use the invite URL shown in the deployment summary
+   - Set your admin password
+
+3. **Navigate to Applications**
    - Click on **Applications** in the sidebar
-   - You should see two applications:
-     - `kube-dashboard-admin`
-     - `kube-dashboard-readonly`
+   - You should see the `dashboard` application (discovered automatically)
 
-3. **Open Dashboard**
-   - Click on the application you want (admin or readonly)
+4. **Open Dashboard**
+   - Click on the `dashboard` application
    - Teleport will open the dashboard in a new window/tab
 
-4. **Authenticate with Dashboard**
+5. **Authenticate with Dashboard**
    - When prompted for a token, paste the appropriate token:
-     - Use **admin token** for `kube-dashboard-admin`
-     - Use **readonly token** for `kube-dashboard-readonly`
+     - Use **admin token** for full access
+     - Use **readonly token** for read-only access
    - Click **Sign In**
 
-5. **Use the Dashboard**
+6. **Use the Dashboard**
    - You now have access to the Kubernetes Dashboard
    - Admin access allows full cluster management
    - Readonly access allows viewing resources only
@@ -541,47 +271,175 @@ This will display:
 
 ## ⚙️ Configuration
 
-### config.yaml Structure
+### Teleport Cluster Configuration
+
+The Teleport cluster is configured with these values:
 
 ```yaml
-teleport:
-  # Teleport Proxy endpoint (required)
-  proxy_addr: "your-tenant.teleport.sh:443"
-  
-  # Kubernetes cluster name in Teleport (required)
-  cluster_name: "my-k8s-cluster"
-  
-  # Teleport join token (required)
-  # Generate from Teleport UI or: tctl tokens add --type=kube,app
-  join_token: "your-token-here"
-  
-  # Teleport agent namespace (optional, default: teleport-agent)
-  namespace: "teleport-agent"
-
-kubernetes:
-  # Dashboard namespace (optional, default: kubernetes-dashboard)
-  namespace: "kubernetes-dashboard"
+clusterName: minikube
+proxyListenerMode: multiplex
+acme: false
+publicAddr:
+  - teleport-cluster.teleport-cluster.svc.cluster.local:8080
+tunnelPublicAddr:
+  - teleport-cluster.teleport-cluster.svc.cluster.local:443
+extraArgs:
+- "--insecure"
+auth:
+  service:
+    enabled: true
+    type: ClusterIP
 ```
 
-### Environment Variables
+### Teleport Kube Agent Configuration
 
-You can also set these via environment variables:
-- `TELEPORT_PROXY_ADDR`
-- `TELEPORT_CLUSTER_NAME`
-- `TELEPORT_JOIN_TOKEN`
-- `TELEPORT_NAMESPACE`
-- `K8S_NAMESPACE`
+The agent is configured with:
+
+```yaml
+roles: kube,app,discovery
+insecureSkipProxyTLSVerify: true
+updater:
+  enabled: false
+kubernetesDiscovery:
+  - types:
+    - app
+    namespaces:
+    - kubernetes-dashboard
+appResources:
+  - labels:
+      app.kubernetes.io/name: kong
+      app.kubernetes.io/instance: kubernetes-dashboard
+```
+
+### Dashboard Service Annotations
+
+The dashboard service is annotated for Teleport discovery:
+
+```yaml
+teleport.dev/name: dashboard
+teleport.dev/protocol: https
+teleport.dev/ignore-tls: true
+```
 
 ---
 
 ## 🔒 Security
+
+### ⚠️ Security Risk Assessment
+
+**Current Status:** 🔴 **CRITICAL RISK (Not Production Ready)**
+**Scope:** Local Minikube development environment only.
+
+This architecture deliberately bypasses standard security controls (TLS validation, DNS resolution, HA storage) to function within a single-node, air-gapped local environment. Deploying this configuration to a shared or public network exposes the infrastructure to Man-in-the-Middle (MitM) attacks, data loss, and denial of service.
+
+#### 1. Network & Transport Security
+
+**🔴 Risk: Broken Trust Chain (MitM Vulnerability)**
+
+**Configuration:**
+- `insecureSkipProxyTLSVerify: true` (Agent side)
+- `--insecure` (Cluster side)
+- `teleport.dev/ignore-tls: true` (Dashboard annotation)
+
+**Impact:**
+The Teleport components (Agent, Proxy, Auth) are configured to blindly trust any server presenting a certificate, regardless of validity.
+
+- **Attack Vector:** An attacker on the local network (e.g., public WiFi) could intercept traffic between the Agent and the Cluster. The Agent would accept the attacker's fake certificate and hand over session credentials.
+- **Production Requirement:** Valid x.509 certificates (Let's Encrypt/ACME) or a properly distributed internal PKI. All "insecure" flags must be removed.
+
+**🔴 Risk: Ephemeral Connection Tunneling**
+
+**Configuration:**
+- Access relies on `kubectl port-forward` tunnels.
+- `/etc/hosts` DNS spoofing (`127.0.0.1 teleport-cluster...`).
+
+**Impact:**
+- **Availability:** Port forwarding is a debug tool. It is single-threaded and drops connections upon network jitter or timeout.
+- **Scalability:** Requires every user to have root access to their local machine to modify `/etc/hosts` and active Kubernetes credentials to open tunnels.
+- **Production Requirement:** A dedicated Layer 4 (TCP) Load Balancer (AWS NLB, GCP LB) with a public, resolvable DNS record (e.g., `teleport.example.com`).
+
+#### 2. Data Integrity & Availability
+
+**🔴 Risk: Single Point of Failure (SPOF)**
+
+**Configuration:**
+- Single replica deployment (no high availability configured)
+- `proxyListenerMode: multiplex` (Single pod handling all roles)
+
+**Impact:**
+If the single Teleport pod crashes (OOM, node update, storage failure), the entire access gateway goes offline.
+
+- **Consequence:** Immediate lockout. No SSH, Kubernetes, or Application access is possible until the specific pod recovers.
+- **Production Requirement:** Minimum 2 replicas spread across availability zones (`topologySpreadConstraints`) with `podDisruptionBudget` enabled.
+
+**🔴 Risk: Volatile Audit & Session Data**
+
+**Configuration:**
+- Storage uses local Kubernetes `PersistentVolumeClaim` (PVC) on the Minikube node.
+
+**Impact:**
+- **Data Loss:** If the Minikube virtual machine is deleted or the disk corrupts, **all** audit logs and session recordings are permanently lost.
+- **Compliance Violation:** Fails SOC2/ISO27001 requirements for durable, immutable audit trails.
+- **Production Requirement:**
+  - **Cluster State:** DynamoDB (AWS), Firestore (GCP), or etcd.
+  - **Audit/Sessions:** S3 (AWS) or GCS (GCP) with Object Lock enabled.
+
+#### 3. Access Control & Identity
+
+**🟠 Risk: Static & Long-Lived Tokens**
+
+**Configuration:**
+- Manual token generation: `tctl tokens add --type=kube,app,discovery --ttl=1h`.
+- Tokens are often hardcoded into Helm `values.yaml` or shell history during setup.
+
+**Impact:**
+If a static token leaks, an attacker can register a malicious node to the cluster and potentially pivot laterally.
+
+- **Production Requirement:** Use short-lived dynamic joining methods:
+  - **AWS:** IAM Joining (Node Identity).
+  - **Kubernetes:** Token Review API / Teleport Operator.
+
+**🟠 Risk: "Split-Brain" Configuration**
+
+**Configuration:**
+- Browser Traffic: Port `8080`.
+- Agent Traffic: Port `443`.
+- Requires manual Service patching (`kubectl patch service...`) to function.
+
+**Impact:**
+High risk of configuration drift. Upgrading the Helm chart will wipe the manual Service patch, causing an immediate outage for all Agents.
+
+- **Production Requirement:** Unified port configuration (443 only) managed strictly via Infrastructure-as-Code (Helm/Terraform) without manual `kubectl` patches.
+
+#### 4. Remediation Plan (Path to Production)
+
+To move from **Sandbox** to **Production**, the following refactoring is mandatory:
+
+1. **Switch Storage Backend:**
+   - Update `teleport.yaml` to use AWS DynamoDB + S3 (or equivalent cloud services) instead of local PVCs.
+
+2. **Enable ACME / TLS:**
+   - Set `acme: true` and `acmeEmail: your-email@domain.com` in Helm.
+   - Remove all `--insecure` flags.
+
+3. **Implement Ingress/LoadBalancer:**
+   - Provision a Cloud Load Balancer listening on 443.
+   - Create a public DNS `A` record pointing to the LB.
+
+4. **Scale Up:**
+   - Set `highAvailability.replicaCount: 2` (or 3).
+   - Enable `podDisruptionBudget`.
+
+5. **Remove Local Hacks:**
+   - Delete `/etc/hosts` entries.
+   - Stop `kubectl port-forward`.
 
 ### RBAC Configuration
 
 **Admin Access:**
 - ServiceAccount: `dashboard-admin-account`
 - Role: `cluster-admin` (full cluster access)
-- Token: Stored in `dashboard-admin-token` secret
+- Token: Stored in `dashboard-token` secret
 
 **Readonly Access:**
 - ServiceAccount: `dashboard-readonly-account`
@@ -590,150 +448,112 @@ You can also set these via environment variables:
   - No create, update, delete, or patch permissions
 - Token: Stored in `dashboard-readonly-token` secret
 
-### Security Best Practices
+### Teleport Roles
 
-1. **Token Management**:
-   - Tokens are stored in Kubernetes Secrets
-   - Rotate tokens regularly
-   - Use readonly token when possible
-
-2. **Teleport Security**:
-   - All access goes through Teleport
-   - Teleport handles authentication and authorization
-   - Dashboard is not exposed publicly
-
-3. **Network Security**:
-   - Dashboard uses ClusterIP (internal only)
-   - No NodePort or LoadBalancer exposure
-   - All traffic encrypted via Teleport
-
-4. **Access Control**:
-   - Use Teleport RBAC to control who can access applications
-   - Separate admin and readonly access
-   - Audit all access through Teleport
+**k8s-admin Role:**
+- `kubernetes_labels: {"*": "*"}`
+- `kubernetes_groups: ["system:masters"]`
+- Assigned to admin user for Kubernetes access
 
 ---
 
 ## 🐛 Troubleshooting
 
-### Teleport Web UI Not Accessible
+### Port-Forward Not Starting
 
-If you can't access `https://localhost:3080`, check the following:
+**Issue**: Port-forward fails to start
 
-1. **Check Teleport Status:**
+**Solutions:**
+1. Check if port 8080 is already in use:
    ```bash
-   make teleport-status
+   lsof -i :8080
    ```
 
-2. **View Logs:**
+2. Check if the service has port 8080:
    ```bash
-   make logs
-   # Select option 1 for Teleport Server logs
+   kubectl get svc -n teleport-cluster teleport-cluster -o yaml | grep -A 5 ports
    ```
 
-3. **Check Port-Forward:**
+3. Manually start port-forward:
    ```bash
-   # Check if port-forward is running
-   pgrep -f "kubectl port-forward.*teleport.*3080"
-   
-   # If not running, start it:
-   make teleport-port-forward
+   kubectl port-forward -n teleport-cluster svc/teleport-cluster 8080:8080
    ```
-
-4. **Common Issues:**
-   - **"Page can't open" / "Connection refused"**: 
-     - Port-forward might not be running. Start it with `make teleport-port-forward`
-     - Check if Teleport server pods are running: `kubectl get pods -n teleport-cluster`
-     - Wait for Teleport to be ready: `kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=teleport-cluster -n teleport-cluster`
-   - **Port already in use**: Another service might be using port 3080. Check with `lsof -i :3080` and stop the conflicting service.
-   - **Teleport pod not ready**: Check logs with `make logs` (option 1) to see what's wrong.
-   - **Certificate errors in browser**: For local testing, accept the self-signed certificate warning. This is expected for Kubernetes-deployed Teleport.
-
-5. **Restart Teleport:**
-   ```bash
-   make teleport-clean
-   make deploy-teleport
-   make teleport-port-forward
-   ```
-
-### Other Issues
 
 ### Dashboard Not Appearing in Teleport
 
 **Issue**: Applications don't show up in Teleport web UI
 
-**Solutions**:
+**Solutions:**
 1. Check Teleport agent logs:
    ```bash
-   make logs
+   kubectl logs -n teleport-agent -l app.kubernetes.io/name=teleport-kube-agent
    ```
 
-2. Verify join token is correct:
+2. Verify service annotations:
    ```bash
-   kubectl get secret teleport-join-token -n teleport-agent
+   kubectl get svc -n kubernetes-dashboard kubernetes-dashboard-kong-proxy -o yaml | grep teleport.dev
    ```
 
-3. Check Teleport agent pod status:
+3. Check if discovery is enabled:
    ```bash
-   kubectl get pods -n teleport-agent
+   kubectl get pods -n teleport-agent -l app.kubernetes.io/name=teleport-kube-agent
    ```
 
-4. Verify proxy address is correct in config.yaml
+### Cannot Access Teleport Web UI
 
-### Cannot Access Dashboard
+**Issue**: Can't access `https://teleport-cluster.teleport-cluster.svc.cluster.local:8080`
 
-**Issue**: Can access via Teleport but dashboard shows errors
-
-**Solutions**:
-1. Verify tokens are valid:
+**Solutions:**
+1. Check `/etc/hosts` has the DNS mapping:
    ```bash
-   make get-tokens
+   grep teleport-cluster /etc/hosts
    ```
 
-2. Check if tokens exist:
+2. Check if port-forward is running:
    ```bash
-   kubectl get secrets -n kubernetes-dashboard | grep dashboard
+   pgrep -f "kubectl port-forward.*teleport.*8080"
    ```
 
-3. If tokens are missing, redeploy RBAC:
+3. Check Teleport pods are running:
    ```bash
-   kubectl apply -f k8s/rbac.yaml
+   kubectl get pods -n teleport-cluster
    ```
 
 ### Teleport Agent Not Starting
 
 **Issue**: Teleport agent pod is in CrashLoopBackOff
 
-**Solutions**:
+**Solutions:**
 1. Check pod logs:
    ```bash
-   kubectl logs -n teleport-agent -l app=teleport-kube-agent
+   kubectl logs -n teleport-agent -l app.kubernetes.io/name=teleport-kube-agent
    ```
 
-2. Verify join token format (should be 32 characters)
-3. Check proxy address is reachable from cluster
-4. Verify cluster name matches Teleport configuration
-
-### Dashboard Service Not Found
-
-**Issue**: Cannot get ClusterIP for dashboard
-
-**Solutions**:
-1. Check if dashboard is deployed:
+2. Verify service has port 8080 (agent needs it):
    ```bash
-   kubectl get pods -n kubernetes-dashboard
+   kubectl get svc -n teleport-cluster teleport-cluster
    ```
 
-2. Check service:
+3. Check if service patching succeeded:
    ```bash
-   kubectl get svc -n kubernetes-dashboard
+   kubectl get svc -n teleport-cluster teleport-cluster -o yaml | grep -A 10 ports
    ```
 
-3. Redeploy dashboard if needed:
+### Prerequisites Check Failing
+
+**Issue**: `make helm-deploy` fails on prerequisites
+
+**Solutions:**
+1. Enable minikube addons manually:
    ```bash
-   helm upgrade --install kubernetes-dashboard \
-     kubernetes-dashboard/kubernetes-dashboard \
-     --namespace kubernetes-dashboard
+   minikube addons enable ingress
+   minikube addons enable ingress-dns
+   ```
+
+2. Add DNS mappings to `/etc/hosts`:
+   ```bash
+   sudo sh -c 'echo "127.0.0.1 teleport-cluster.teleport-cluster.svc.cluster.local" >> /etc/hosts'
+   sudo sh -c 'echo "127.0.0.1 dashboard.teleport-cluster.teleport-cluster.svc.cluster.local" >> /etc/hosts'
    ```
 
 ---
@@ -747,33 +567,49 @@ make helm-clean
 ```
 
 This will:
+- Stop port-forward
 - Uninstall Teleport Kube Agent
 - Uninstall Kubernetes Dashboard
-- Remove namespaces (optional, may need manual cleanup)
+- Uninstall Teleport Cluster
+- Remove namespaces
+- Clean up RBAC resources
 
 ### Manual Cleanup
 
 ```bash
-# Remove Helm releases
-helm uninstall teleport-kube-agent --namespace teleport-agent
-helm uninstall kubernetes-dashboard --namespace kubernetes-dashboard
+# Stop port-forward
+pkill -f "kubectl port-forward.*teleport.*8080"
 
-# Remove namespaces (optional)
+# Remove Helm releases
+helm uninstall teleport-agent --namespace teleport-agent
+helm uninstall kubernetes-dashboard --namespace kubernetes-dashboard
+helm uninstall teleport-cluster --namespace teleport-cluster
+
+# Remove namespaces
 kubectl delete namespace teleport-agent
 kubectl delete namespace kubernetes-dashboard
+kubectl delete namespace teleport-cluster
+
+# Remove RBAC resources
+kubectl delete -f k8s/rbac.yaml
 ```
 
 ---
 
-## 📚 Reference
+## 📚 References
 
-- **Teleport Application Access Guide**: [https://github.com/gravitational/teleport/discussions/31811](https://github.com/gravitational/teleport/discussions/31811)
-- **Teleport Community Edition Setup**: [https://goteleport.com/docs/get-started/deploy-community/](https://goteleport.com/docs/get-started/deploy-community/)
-- **Kubernetes Dashboard**: [https://github.com/kubernetes/dashboard](https://github.com/kubernetes/dashboard)
+### Official Documentation
+
+- **Teleport Cluster Deployment**: [https://goteleport.com/docs/zero-trust-access/deploy-a-cluster/helm-deployments/kubernetes-cluster/](https://goteleport.com/docs/zero-trust-access/deploy-a-cluster/helm-deployments/kubernetes-cluster/)
+- **Self-Signed Certificates**: [https://goteleport.com/docs/zero-trust-access/deploy-a-cluster/self-signed-certs/](https://goteleport.com/docs/zero-trust-access/deploy-a-cluster/self-signed-certs/)
+- **Kubernetes Dashboard with Teleport**: [https://github.com/gravitational/teleport/discussions/31811](https://github.com/gravitational/teleport/discussions/31811)
+
+### Additional Resources
+
 - **Teleport Documentation**: [https://goteleport.com/docs/](https://goteleport.com/docs/)
+- **Kubernetes Dashboard**: [https://github.com/kubernetes/dashboard](https://github.com/kubernetes/dashboard)
 - **Teleport Kube Agent Chart**: [https://artifacthub.io/packages/helm/teleport/teleport-kube-agent](https://artifacthub.io/packages/helm/teleport/teleport-kube-agent)
 - **Kubernetes Dashboard Chart**: [https://artifacthub.io/packages/helm/k8s-dashboard/kubernetes-dashboard](https://artifacthub.io/packages/helm/k8s-dashboard/kubernetes-dashboard)
-- **Teleport Enterprise**: [https://goteleport.com/pricing/](https://goteleport.com/pricing/)
 
 ---
 
@@ -794,5 +630,4 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 For issues and questions:
 - Open an issue in the repository
 - Check the [Troubleshooting](#-troubleshooting) section
-- Refer to the [Reference](#-reference) links
-
+- Refer to the [References](#-references) links
