@@ -46,7 +46,7 @@ help:
 	@echo "  - Deploy Teleport server to Kubernetes"
 	@echo "  - Create admin user"
 	@echo "  - Generate join token"
-	@echo "  - Start port-forward to localhost:443"
+	@echo "  - Start port-forward to localhost:8080"
 	@echo "  - Deploy Kubernetes Dashboard"
 	@echo "  - Deploy Teleport agent"
 	@echo ""
@@ -122,14 +122,16 @@ check-prerequisites:
 	@if minikube addons list 2>/dev/null | grep -q "ingress.*enabled"; then \
 		echo "✅ Ingress addon is enabled"; \
 	else \
-		echo "❌ Ingress addon is not enabled. Run: minikube addons enable ingress"; \
-		exit 1; \
+		echo "⚠️  Ingress addon is not enabled. Enabling now..."; \
+		minikube addons enable ingress || exit 1; \
+		echo "✅ Ingress addon enabled"; \
 	fi
 	@if minikube addons list 2>/dev/null | grep -q "ingress-dns.*enabled"; then \
 		echo "✅ Ingress-DNS addon is enabled"; \
 	else \
-		echo "❌ Ingress-DNS addon is not enabled. Run: minikube addons enable ingress-dns"; \
-		exit 1; \
+		echo "⚠️  Ingress-DNS addon is not enabled. Enabling now..."; \
+		minikube addons enable ingress-dns || exit 1; \
+		echo "✅ Ingress-DNS addon enabled"; \
 	fi
 	@echo "🔍 Checking /etc/hosts DNS mappings..."
 	@if grep -q "teleport-cluster.teleport-cluster.svc.cluster.local" /etc/hosts 2>/dev/null; then \
@@ -160,6 +162,7 @@ helm-deploy: check-minikube check-prerequisites
 	@echo "✅ RBAC resources deployed!"
 	@echo ""
 	@echo "Step 2/6: Deploying Teleport server to Kubernetes..."
+	@echo "⏳ Note: This step may take up to 5 minutes while the Helm chart deploys and pods become ready..."
 	@echo "🚀 Deploying Teleport server to Kubernetes using official Helm chart..."
 	@echo "📦 Adding Teleport Helm repository..."
 	@helm repo add teleport https://charts.releases.teleport.dev 2>/dev/null || true
@@ -168,7 +171,7 @@ helm-deploy: check-minikube check-prerequisites
 	@kubectl create namespace teleport-cluster 2>/dev/null || true
 	@kubectl label namespace teleport-cluster 'pod-security.kubernetes.io/enforce=baseline' 2>/dev/null || true
 	@echo "⚙️  Creating Helm values file for local testing..."
-	@printf 'clusterName: minikube\nproxyListenerMode: multiplex\nacme: false\npublicAddr:\n  - teleport-cluster.teleport-cluster.svc.cluster.local:443\nextraArgs:\n- "--insecure"\nauth:\n  service:\n    enabled: true\n    type: ClusterIP\nhighAvailability:\n  replicaCount: 1\n  podDisruptionBudget:\n    enabled: false\nlog:\n  level: DEBUG\n' > /tmp/teleport-cluster-values.yaml
+	@printf 'clusterName: minikube\nproxyListenerMode: multiplex\nacme: false\npublicAddr:\n  - teleport-cluster.teleport-cluster.svc.cluster.local:8080\ntunnelPublicAddr:\n  - teleport-cluster.teleport-cluster.svc.cluster.local:443\nextraArgs:\n- "--insecure"\nauth:\n  service:\n    enabled: true\n    type: ClusterIP\n' > /tmp/teleport-cluster-values.yaml
 	@echo "🔧 Installing Teleport cluster Helm chart..."
 	@helm upgrade --install teleport-cluster teleport/teleport-cluster \
 		--version 18.6.0 \
@@ -176,9 +179,6 @@ helm-deploy: check-minikube check-prerequisites
 		--values /tmp/teleport-cluster-values.yaml \
 		--wait --timeout=5m || true
 	@rm -f /tmp/teleport-cluster-values.yaml
-	@echo "⏳ Waiting for Teleport pods to be ready..."
-	@kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=teleport-cluster -n teleport-cluster --timeout=300s 2>/dev/null || \
-		(echo "⚠️  Pods may still be starting. Check status with: kubectl get pods -n teleport-cluster" && sleep 10)
 	@echo "✅ Teleport server deployed!"
 	@echo ""
 	@echo "Step 3/6: Setting up Teleport admin user with Kubernetes access..."
@@ -209,11 +209,11 @@ helm-deploy: check-minikube check-prerequisites
 		if [ -n "$$OUTPUT" ]; then \
 			INVITE_URL=$$(echo "$$OUTPUT" | grep -oE 'https://[^[:space:]]+/web/invite/[^[:space:]]+' | head -1); \
 			if [ -n "$$INVITE_URL" ]; then \
-				INVITE_URL=$$(echo "$$INVITE_URL" | sed 's|https://teleport-cluster\.teleport-cluster\.svc\.cluster\.local:443|https://localhost:443|g' | sed 's|https://minikube:443|https://localhost:443|g' | sed 's|minikube:443|localhost:443|g'); \
-				echo "$$OUTPUT" | sed 's|https://teleport-cluster\.teleport-cluster\.svc\.cluster\.local:443|https://localhost:443|g' | sed 's|https://minikube:443|https://localhost:443|g' | sed 's|minikube:443|localhost:443|g'; \
+				INVITE_URL=$$(echo "$$INVITE_URL" | sed 's|https://teleport-cluster\.teleport-cluster\.svc\.cluster\.local:[0-9]*|https://teleport-cluster.teleport-cluster.svc.cluster.local:8080|g' | sed 's|https://minikube:[0-9]*|https://teleport-cluster.teleport-cluster.svc.cluster.local:8080|g'); \
+				echo "$$OUTPUT" | sed 's|https://teleport-cluster\.teleport-cluster\.svc\.cluster\.local:[0-9]*|https://teleport-cluster.teleport-cluster.svc.cluster.local:8080|g' | sed 's|https://minikube:[0-9]*|https://teleport-cluster.teleport-cluster.svc.cluster.local:8080|g'; \
 				echo "$$INVITE_URL" > /tmp/teleport-admin-invite-url.txt; \
 			else \
-				echo "$$OUTPUT" | sed 's|https://teleport-cluster\.teleport-cluster\.svc\.cluster\.local:443|https://localhost:443|g' | sed 's|https://minikube:443|https://localhost:443|g' | sed 's|minikube:443|localhost:443|g'; \
+				echo "$$OUTPUT" | sed 's|https://teleport-cluster\.teleport-cluster\.svc\.cluster\.local:[0-9]*|https://teleport-cluster.teleport-cluster.svc.cluster.local:8080|g' | sed 's|https://minikube:[0-9]*|https://teleport-cluster.teleport-cluster.svc.cluster.local:8080|g'; \
 			fi; \
 		fi; \
 		echo "✅ Admin user created"; \
@@ -224,11 +224,11 @@ helm-deploy: check-minikube check-prerequisites
 		if [ -n "$$OUTPUT" ]; then \
 			INVITE_URL=$$(echo "$$OUTPUT" | grep -oE 'https://[^[:space:]]+/web/invite/[^[:space:]]+' | head -1); \
 			if [ -n "$$INVITE_URL" ]; then \
-				INVITE_URL=$$(echo "$$INVITE_URL" | sed 's|https://teleport-cluster\.teleport-cluster\.svc\.cluster\.local:443|https://localhost:443|g' | sed 's|https://minikube:443|https://localhost:443|g' | sed 's|minikube:443|localhost:443|g'); \
-				echo "$$OUTPUT" | sed 's|https://teleport-cluster\.teleport-cluster\.svc\.cluster\.local:443|https://localhost:443|g' | sed 's|https://minikube:443|https://localhost:443|g' | sed 's|minikube:443|localhost:443|g'; \
+				INVITE_URL=$$(echo "$$INVITE_URL" | sed 's|https://teleport-cluster\.teleport-cluster\.svc\.cluster\.local:[0-9]*|https://teleport-cluster.teleport-cluster.svc.cluster.local:8080|g' | sed 's|https://minikube:[0-9]*|https://teleport-cluster.teleport-cluster.svc.cluster.local:8080|g'); \
+				echo "$$OUTPUT" | sed 's|https://teleport-cluster\.teleport-cluster\.svc\.cluster\.local:[0-9]*|https://teleport-cluster.teleport-cluster.svc.cluster.local:8080|g' | sed 's|https://minikube:[0-9]*|https://teleport-cluster.teleport-cluster.svc.cluster.local:8080|g'; \
 				echo "$$INVITE_URL" > /tmp/teleport-admin-invite-url.txt; \
 			else \
-				echo "$$OUTPUT" | sed 's|https://teleport-cluster\.teleport-cluster\.svc\.cluster\.local:443|https://localhost:443|g' | sed 's|https://minikube:443|https://localhost:443|g' | sed 's|minikube:443|localhost:443|g'; \
+				echo "$$OUTPUT" | sed 's|https://teleport-cluster\.teleport-cluster\.svc\.cluster\.local:[0-9]*|https://teleport-cluster.teleport-cluster.svc.cluster.local:8080|g' | sed 's|https://minikube:[0-9]*|https://teleport-cluster.teleport-cluster.svc.cluster.local:8080|g'; \
 			fi; \
 		fi; \
 		echo "✅ Admin user roles updated and reset"; \
@@ -278,31 +278,7 @@ helm-deploy: check-minikube check-prerequisites
 		echo "✅ Using existing token from config.yaml"; \
 	fi
 	@echo ""
-	@echo "Step 5/6: Starting Teleport port-forward..."
-	@if pgrep -f "kubectl port-forward.*teleport.*443" > /dev/null || pgrep -f "sudo.*kubectl port-forward.*teleport.*443" > /dev/null; then \
-		echo "✅ Port-forward already running"; \
-	else \
-		if kubectl get svc teleport-cluster -n teleport-cluster >/dev/null 2>&1; then \
-			echo "⚠️  Port 443 requires sudo privileges."; \
-			echo ""; \
-			echo "📋 Please run the following command manually in a separate terminal:"; \
-			echo "   sudo kubectl port-forward -n teleport-cluster svc/teleport-cluster 443:443"; \
-			echo ""; \
-			echo "⚠️  Port-forward must be running before accessing Teleport."; \
-		elif kubectl get svc teleport -n teleport >/dev/null 2>&1; then \
-			echo "⚠️  Port 443 requires sudo privileges."; \
-			echo ""; \
-			echo "📋 Please run the following command manually in a separate terminal:"; \
-			echo "   sudo kubectl port-forward -n teleport svc/teleport 443:443"; \
-			echo ""; \
-			echo "⚠️  Port-forward must be running before accessing Teleport."; \
-		else \
-			echo "⚠️  Teleport service not found. Port-forward will need to be started manually."; \
-			echo "   Run: sudo kubectl port-forward -n teleport-cluster svc/teleport-cluster 443:443"; \
-		fi; \
-	fi
-	@echo ""
-	@echo "Step 6/6: Deploying Dashboard and Teleport Agent..."
+	@echo "Step 5/6: Deploying Dashboard and Teleport Agent..."
 	@sh -c "set -e; \
 	TOKEN=\$$(grep -E '^\s*join_token:' config.yaml 2>/dev/null | sed -E 's/.*join_token:[[:space:]]*[\"'\'']?([^\"'\'']+)[\"'\'']?.*/\1/' | head -1); \
 	if [ -z \"\$$TOKEN\" ] || [ \"\$$TOKEN\" = \"YOUR_TELEPORT_JOIN_TOKEN_HERE\" ]; then \
@@ -373,7 +349,6 @@ helm-deploy: check-minikube check-prerequisites
 		\"teleport.dev/name=dashboard\" \
 		\"teleport.dev/protocol=https\" \
 		\"teleport.dev/ignore-tls=true\" \
-		\"teleport.dev/public-addr=dashboard.teleport-cluster.teleport-cluster.svc.cluster.local\" \
 		--overwrite 2>/dev/null || echo '⚠️  Failed to add annotations, continuing...'; \
 	echo '✅ Added Teleport annotations to dashboard service'; \
 	echo '🔧 Installing Teleport Kube Agent...'; \
@@ -401,9 +376,33 @@ helm-deploy: check-minikube check-prerequisites
 		--version 18.6.0 \
 		--create-namespace \
 		--namespace \$$TELEPORT_NS \
-		-f \$$TEMP_VALUES \
-		--wait --timeout=5m || true; \
-	rm -f \$$TEMP_VALUES"
+		-f \$$TEMP_VALUES || true; \
+	rm -f \$$TEMP_VALUES; \
+	echo '🔧 Patching teleport-cluster service to add port 8080...'; \
+	kubectl patch service -n teleport-cluster teleport-cluster --type='json' -p='[{"op": "add", "path": "/spec/ports/-", "value": {"name": "agent-fallback", "port": 8080, "protocol": "TCP", "targetPort": 3080}}]' 2>/dev/null || echo '⚠️  Service patch failed or port already exists, continuing...'; \
+	echo '🔄 Restarting teleport-agent pods...'; \
+	kubectl delete pods -n \$$TELEPORT_NS --all --wait=false 2>/dev/null || true; \
+	sleep 3; \
+	echo '🔌 Starting port-forward to localhost:8080...'; \
+	if pgrep -f 'kubectl port-forward.*teleport.*8080' > /dev/null; then \
+		echo '✅ Port-forward already running'; \
+	else \
+		if kubectl get svc teleport-cluster -n teleport-cluster >/dev/null 2>&1; then \
+			kubectl port-forward -n teleport-cluster svc/teleport-cluster 8080:8080 > /tmp/teleport-port-forward.log 2>&1 & \
+			PF_PID=\$$!; \
+			echo \$$PF_PID > /tmp/teleport-port-forward.pid; \
+			sleep 2; \
+			if pgrep -f 'kubectl port-forward.*teleport.*8080' > /dev/null; then \
+				echo '✅ Port-forward started (PID: '\$$PF_PID')'; \
+				echo '   Access Teleport at: https://teleport-cluster.teleport-cluster.svc.cluster.local:8080'; \
+			else \
+				echo '⚠️  Port-forward failed to start. Check logs: cat /tmp/teleport-port-forward.log'; \
+			fi; \
+		else \
+			echo '⚠️  Teleport service not found. Port-forward will need to be started manually.'; \
+			echo '   Run: kubectl port-forward -n teleport-cluster svc/teleport-cluster 8080:8080'; \
+		fi; \
+	fi"
 	@echo ""
 	@echo "✅ Full deployment complete!"
 	@echo ""
@@ -414,8 +413,8 @@ helm-deploy: check-minikube check-prerequisites
 	@echo "  ✅ Teleport server deployed and running"
 	@echo "  ✅ Admin user created"
 	@echo "  ✅ Join token generated"
-	@if pgrep -f "kubectl port-forward.*teleport.*443" > /dev/null || pgrep -f "sudo.*kubectl port-forward.*teleport.*443" > /dev/null; then \
-		echo "  ✅ Port-forward active (https://localhost:443)"; \
+	@if pgrep -f "kubectl port-forward.*teleport.*8080" > /dev/null; then \
+		echo "  ✅ Port-forward active (https://teleport-cluster.teleport-cluster.svc.cluster.local:8080)"; \
 	else \
 		echo "  ⚠️  Port-forward NOT running (required for access)"; \
 	fi
@@ -429,13 +428,13 @@ helm-deploy: check-minikube check-prerequisites
 		echo ""; \
 		echo "📋 Next Steps:"; \
 		echo ""; \
-		if ! pgrep -f "kubectl port-forward.*teleport.*443" > /dev/null && ! pgrep -f "sudo.*kubectl port-forward.*teleport.*443" > /dev/null; then \
+		if ! pgrep -f "kubectl port-forward.*teleport.*8080" > /dev/null; then \
 			echo "  0️⃣  Start Port-Forward (REQUIRED):"; \
 			echo "     • Run in a separate terminal:"; \
 			if kubectl get svc teleport-cluster -n teleport-cluster >/dev/null 2>&1; then \
-				echo "       sudo kubectl port-forward -n teleport-cluster svc/teleport-cluster 443:443"; \
+				echo "       kubectl port-forward -n teleport-cluster svc/teleport-cluster 8080:8080"; \
 			else \
-				echo "       sudo kubectl port-forward -n teleport svc/teleport 443:443"; \
+				echo "       kubectl port-forward -n teleport svc/teleport 8080:8080"; \
 			fi; \
 			echo "     • Keep this terminal open while using Teleport"; \
 			echo ""; \
@@ -445,7 +444,7 @@ helm-deploy: check-minikube check-prerequisites
 		echo "     • Set your admin password"; \
 		echo ""; \
 		echo "  2️⃣  Access Teleport Web Console:"; \
-		echo "     • URL: https://localhost:443"; \
+		echo "     • URL: https://teleport-cluster.teleport-cluster.svc.cluster.local:8080"; \
 		echo "     • Log in with username: admin"; \
 		echo ""; \
 		echo "  3️⃣  Get Dashboard Access Tokens:"; \
@@ -461,19 +460,19 @@ helm-deploy: check-minikube check-prerequisites
 	else \
 		echo "📋 Next Steps:"; \
 		echo ""; \
-		if ! pgrep -f "kubectl port-forward.*teleport.*443" > /dev/null && ! pgrep -f "sudo.*kubectl port-forward.*teleport.*443" > /dev/null; then \
+		if ! pgrep -f "kubectl port-forward.*teleport.*8080" > /dev/null; then \
 			echo "  0️⃣  Start Port-Forward (REQUIRED):"; \
 			echo "     • Run in a separate terminal:"; \
 			if kubectl get svc teleport-cluster -n teleport-cluster >/dev/null 2>&1; then \
-				echo "       sudo kubectl port-forward -n teleport-cluster svc/teleport-cluster 443:443"; \
+				echo "       kubectl port-forward -n teleport-cluster svc/teleport-cluster 8080:8080"; \
 			else \
-				echo "       sudo kubectl port-forward -n teleport svc/teleport 443:443"; \
+				echo "       kubectl port-forward -n teleport svc/teleport 8080:8080"; \
 			fi; \
 			echo "     • Keep this terminal open while using Teleport"; \
 			echo ""; \
 		fi; \
 		echo "  1️⃣  Access Teleport Web Console:"; \
-		echo "     • URL: https://localhost:443"; \
+		echo "     • URL: https://teleport-cluster.teleport-cluster.svc.cluster.local:8080"; \
 		echo ""; \
 		echo "  2️⃣  Get Dashboard Access Tokens:"; \
 		echo "     • Run: make get-tokens"; \
@@ -503,8 +502,7 @@ helm-clean:
 		fi; \
 		rm -f /tmp/teleport-port-forward.pid; \
 	fi; \
-	pkill -f "kubectl port-forward.*teleport.*443" 2>/dev/null || true; \
-	pkill -f "sudo.*kubectl port-forward.*teleport.*443" 2>/dev/null || true; \
+	pkill -f "kubectl port-forward.*teleport.*8080" 2>/dev/null || true; \
 	echo "✅ Port-forward cleanup complete"
 	@echo ""
 	@echo "Step 2/6: Uninstalling Helm releases..."
