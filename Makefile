@@ -246,12 +246,11 @@ helm-deploy: check-prerequisites
 		helm repo update; \
 		kubectl create namespace \$$CLUSTER_NS 2>/dev/null || true; \
 		kubectl label namespace \$$CLUSTER_NS 'pod-security.kubernetes.io/enforce=baseline' 2>/dev/null || true; \
-		printf 'clusterName: minikube\nproxyListenerMode: multiplex\nacme: false\npublicAddr:\n  - %s.%s.svc.cluster.local:8080\ntunnelPublicAddr:\n  - %s.%s.svc.cluster.local:443\nextraArgs:\n- "--insecure"\nauth:\n  service:\n    enabled: true\n    type: ClusterIP\nreadinessProbe:\n  initialDelaySeconds: 60\n  periodSeconds: 5\n  failureThreshold: 12\n  successThreshold: 1\n' \"\$$CLUSTER_NS\" \"\$$CLUSTER_NS\" \"\$$CLUSTER_NS\" \"\$$CLUSTER_NS\" > /tmp/teleport-cluster-values.yaml; \
+		printf 'clusterName: minikube\nproxyListenerMode: multiplex\nacme: false\npublicAddr:\n  - %s.%s.svc.cluster.local:8080\ntunnelPublicAddr:\n  - %s.%s.svc.cluster.local:443\nextraArgs:\n- "--insecure"\nauth:\n  service:\n    enabled: true\n    type: ClusterIP\n' \"\$$CLUSTER_NS\" \"\$$CLUSTER_NS\" \"\$$CLUSTER_NS\" \"\$$CLUSTER_NS\" > /tmp/teleport-cluster-values.yaml; \
 		helm upgrade --install teleport-cluster teleport/teleport-cluster \
 			--version 18.6.0 \
 			--namespace \"\$$CLUSTER_NS\" \
-			--values /tmp/teleport-cluster-values.yaml \
-			--wait --timeout=5m || true; \
+			--values /tmp/teleport-cluster-values.yaml || true; \
 		rm -f /tmp/teleport-cluster-values.yaml; \
 		echo '⏳ Verifying Teleport cluster pods are running...'; \
 		sleep 5; \
@@ -265,11 +264,25 @@ helm-deploy: check-prerequisites
 		echo '✅ Teleport server deployed!'; \
 		echo ''; \
 		echo 'Step 3/6: Setting up Teleport admin user with Kubernetes access...'; \
+		echo '⏳ Waiting for Teleport auth pod to be ready...'; \
 		POD=\$$(kubectl -n \$$CLUSTER_NS get pods -l app.kubernetes.io/name=teleport-cluster,app.kubernetes.io/component=auth -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo ''); \
 		if [ -z \"\$$POD\" ]; then \
-			echo '❌ Teleport server pod not found'; \
+			echo '⏳ Waiting for auth pod to be created...'; \
+			for i in \$$(seq 1 30); do \
+				sleep 2; \
+				POD=\$$(kubectl -n \$$CLUSTER_NS get pods -l app.kubernetes.io/name=teleport-cluster,app.kubernetes.io/component=auth -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo ''); \
+				if [ -n \"\$$POD\" ]; then \
+					break; \
+				fi; \
+			done; \
+		fi; \
+		if [ -z \"\$$POD\" ]; then \
+			echo '❌ Teleport auth pod not found after waiting'; \
 			exit 1; \
 		fi; \
+		echo '⏳ Waiting for auth pod to be ready...'; \
+		kubectl wait --for=condition=ready pod/\$$POD -n \$$CLUSTER_NS --timeout=120s 2>/dev/null || echo '⚠️  Pod may not be fully ready, continuing anyway...'; \
+		sleep 5; \
 		printf 'kind: role\nversion: v7\nmetadata:\n  name: k8s-admin\nspec:\n  allow:\n    kubernetes_labels:\n      \"*\": \"*\"\n    kubernetes_groups:\n    - system:masters\n' | \
 		kubectl exec -n \$$CLUSTER_NS \$$POD -i -- tctl create -f - 2>/dev/null || \
 		printf 'kind: role\nversion: v7\nmetadata:\n  name: k8s-admin\nspec:\n  allow:\n    kubernetes_labels:\n      \"*\": \"*\"\n    kubernetes_groups:\n    - system:masters\n' | \
@@ -280,11 +293,11 @@ helm-deploy: check-prerequisites
 			if [ -n \"\$$OUTPUT\" ]; then \
 				INVITE_URL=\$$(echo \"\$$OUTPUT\" | grep -oE 'https://[^[:space:]]+/web/invite/[^[:space:]]+' | head -1); \
 				if [ -n \"\$$INVITE_URL\" ]; then \
-					INVITE_URL=\$$(echo \"\$$INVITE_URL\" | sed 's|https://teleport-cluster\.teleport-cluster\.svc\.cluster\.local:[0-9]*|https://teleport-cluster.teleport-cluster.svc.cluster.local:8080|g' | sed 's|https://minikube:[0-9]*|https://teleport-cluster.teleport-cluster.svc.cluster.local:8080|g'); \
-					echo \"\$$OUTPUT\" | sed 's|https://teleport-cluster\.teleport-cluster\.svc\.cluster\.local:[0-9]*|https://teleport-cluster.teleport-cluster.svc.cluster.local:8080|g' | sed 's|https://minikube:[0-9]*|https://teleport-cluster.teleport-cluster.svc.cluster.local:8080|g'; \
+					INVITE_URL=\$$(echo \"\$$INVITE_URL\" | sed 's|<proxyhost>|teleport-cluster.teleport-cluster.svc.cluster.local|g' | sed 's|:3080|:8080|g' | sed 's|https://teleport-cluster\.teleport-cluster\.svc\.cluster\.local:[0-9]*|https://teleport-cluster.teleport-cluster.svc.cluster.local:8080|g' | sed 's|https://minikube:[0-9]*|https://teleport-cluster.teleport-cluster.svc.cluster.local:8080|g'); \
+					echo \"\$$OUTPUT\" | sed 's|<proxyhost>|teleport-cluster.teleport-cluster.svc.cluster.local|g' | sed 's|:3080|:8080|g' | sed 's|https://teleport-cluster\.teleport-cluster\.svc\.cluster\.local:[0-9]*|https://teleport-cluster.teleport-cluster.svc.cluster.local:8080|g' | sed 's|https://minikube:[0-9]*|https://teleport-cluster.teleport-cluster.svc.cluster.local:8080|g'; \
 					echo \"\$$INVITE_URL\" > /tmp/teleport-admin-invite-url.txt; \
 				else \
-					echo \"\$$OUTPUT\" | sed 's|https://teleport-cluster\.teleport-cluster\.svc\.cluster\.local:[0-9]*|https://teleport-cluster.teleport-cluster.svc.cluster.local:8080|g' | sed 's|https://minikube:[0-9]*|https://teleport-cluster.teleport-cluster.svc.cluster.local:8080|g'; \
+					echo \"\$$OUTPUT\" | sed 's|<proxyhost>|teleport-cluster.teleport-cluster.svc.cluster.local|g' | sed 's|:3080|:8080|g' | sed 's|https://teleport-cluster\.teleport-cluster\.svc\.cluster\.local:[0-9]*|https://teleport-cluster.teleport-cluster.svc.cluster.local:8080|g' | sed 's|https://minikube:[0-9]*|https://teleport-cluster.teleport-cluster.svc.cluster.local:8080|g'; \
 				fi; \
 			fi; \
 		else \
@@ -293,21 +306,56 @@ helm-deploy: check-prerequisites
 			if [ -n \"\$$OUTPUT\" ]; then \
 				INVITE_URL=\$$(echo \"\$$OUTPUT\" | grep -oE 'https://[^[:space:]]+/web/invite/[^[:space:]]+' | head -1); \
 				if [ -n \"\$$INVITE_URL\" ]; then \
-					INVITE_URL=\$$(echo \"\$$INVITE_URL\" | sed 's|https://teleport-cluster\.teleport-cluster\.svc\.cluster\.local:[0-9]*|https://teleport-cluster.teleport-cluster.svc.cluster.local:8080|g' | sed 's|https://minikube:[0-9]*|https://teleport-cluster.teleport-cluster.svc.cluster.local:8080|g'); \
-					echo \"\$$OUTPUT\" | sed 's|https://teleport-cluster\.teleport-cluster\.svc\.cluster\.local:[0-9]*|https://teleport-cluster.teleport-cluster.svc.cluster.local:8080|g' | sed 's|https://minikube:[0-9]*|https://teleport-cluster.teleport-cluster.svc.cluster.local:8080|g'; \
+					INVITE_URL=\$$(echo \"\$$INVITE_URL\" | sed 's|<proxyhost>|teleport-cluster.teleport-cluster.svc.cluster.local|g' | sed 's|:3080|:8080|g' | sed 's|https://teleport-cluster\.teleport-cluster\.svc\.cluster\.local:[0-9]*|https://teleport-cluster.teleport-cluster.svc.cluster.local:8080|g' | sed 's|https://minikube:[0-9]*|https://teleport-cluster.teleport-cluster.svc.cluster.local:8080|g'); \
+					echo \"\$$OUTPUT\" | sed 's|<proxyhost>|teleport-cluster.teleport-cluster.svc.cluster.local|g' | sed 's|:3080|:8080|g' | sed 's|https://teleport-cluster\.teleport-cluster\.svc\.cluster\.local:[0-9]*|https://teleport-cluster.teleport-cluster.svc.cluster.local:8080|g' | sed 's|https://minikube:[0-9]*|https://teleport-cluster.teleport-cluster.svc.cluster.local:8080|g'; \
 					echo \"\$$INVITE_URL\" > /tmp/teleport-admin-invite-url.txt; \
 				else \
-					echo \"\$$OUTPUT\" | sed 's|https://teleport-cluster\.teleport-cluster\.svc\.cluster\.local:[0-9]*|https://teleport-cluster.teleport-cluster.svc.cluster.local:8080|g' | sed 's|https://minikube:[0-9]*|https://teleport-cluster.teleport-cluster.svc.cluster.local:8080|g'; \
+					echo \"\$$OUTPUT\" | sed 's|<proxyhost>|teleport-cluster.teleport-cluster.svc.cluster.local|g' | sed 's|:3080|:8080|g' | sed 's|https://teleport-cluster\.teleport-cluster\.svc\.cluster\.local:[0-9]*|https://teleport-cluster.teleport-cluster.svc.cluster.local:8080|g' | sed 's|https://minikube:[0-9]*|https://teleport-cluster.teleport-cluster.svc.cluster.local:8080|g'; \
 				fi; \
 			fi; \
 		fi; \
 		echo ''; \
 		echo 'Step 4/6: Generating Teleport join token...'; \
+		echo '⏳ Ensuring auth pod is ready before generating token...'; \
+		kubectl wait --for=condition=ready pod/\$$POD -n \$$CLUSTER_NS --timeout=60s 2>/dev/null || echo '⚠️  Pod may not be fully ready, continuing anyway...'; \
+		sleep 3; \
+		set +e; \
 		TOKEN_OUTPUT=\$$(kubectl exec -n \$$CLUSTER_NS \$$POD -- tctl tokens add --type=kube,app,discovery --ttl=24h 2>&1); \
+		TOKEN_EXIT=\$$?; \
+		set -e; \
+		if [ \$$TOKEN_EXIT -ne 0 ]; then \
+			echo '⚠️  Token generation command failed. Output:'; \
+			echo \"\$$TOKEN_OUTPUT\"; \
+			echo ''; \
+			echo '⏳ Waiting a bit longer and retrying...'; \
+			sleep 10; \
+			set +e; \
+			TOKEN_OUTPUT=\$$(kubectl exec -n \$$CLUSTER_NS \$$POD -- tctl tokens add --type=kube,app,discovery --ttl=24h 2>&1); \
+			TOKEN_EXIT=\$$?; \
+			set -e; \
+			if [ \$$TOKEN_EXIT -ne 0 ]; then \
+				echo '❌ Token generation failed after retry. Output:'; \
+				echo \"\$$TOKEN_OUTPUT\"; \
+				exit 1; \
+			fi; \
+		fi; \
 		TOKEN=\$$(echo \"\$$TOKEN_OUTPUT\" | grep -oE '[a-f0-9]{32}' | head -1); \
 		if [ -z \"\$$TOKEN\" ]; then \
-			echo '❌ Failed to generate token'; \
-			exit 1; \
+			echo '⚠️  Could not extract token from output. Full output:'; \
+			echo \"\$$TOKEN_OUTPUT\"; \
+			echo ''; \
+			echo '⏳ Retrying token generation...'; \
+			sleep 5; \
+			set +e; \
+			TOKEN_OUTPUT=\$$(kubectl exec -n \$$CLUSTER_NS \$$POD -- tctl tokens add --type=kube,app,discovery --ttl=24h 2>&1); \
+			TOKEN=\$$(echo \"\$$TOKEN_OUTPUT\" | grep -oE '[a-f0-9]{32}' | head -1); \
+			set -e; \
+			if [ -z \"\$$TOKEN\" ]; then \
+				echo '❌ Failed to generate token after retry'; \
+				echo 'Full output:'; \
+				echo \"\$$TOKEN_OUTPUT\"; \
+				exit 1; \
+			fi; \
 		fi; \
 		echo \"✅ Generated token: \$$TOKEN\"; \
 		PROXY=\"\$$CLUSTER_NS.\$$CLUSTER_NS.svc.cluster.local:443\"; \
