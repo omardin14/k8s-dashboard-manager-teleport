@@ -25,39 +25,89 @@ A complete Kubernetes solution that deploys the Kubernetes Dashboard and makes i
 
 ## 🚀 Quick Start
 
+### Deployment Modes
+
+The setup supports two deployment modes based on `proxy_addr` in `config.yaml`:
+
+1. **Local Mode** (`proxy_addr: ""`): Deploys Teleport cluster in Kubernetes (Minikube)
+2. **Enterprise Mode** (`proxy_addr: "your-proxy.teleport.com:443"`): Connects to existing Teleport Enterprise/Cloud
+
 ### Prerequisites
 
+**For Local Mode:**
 - **Minikube** installed and running
 - `kubectl` configured to access your cluster
 - `helm` installed (v3.x)
 - **macOS/Linux** (for `/etc/hosts` modification)
+- DNS mappings in `/etc/hosts` (automatically checked)
+
+**For Enterprise Mode:**
+- `kubectl` configured to access your cluster
+- `helm` installed (v3.x)
+- Teleport Enterprise/Cloud instance
+- Join token from Teleport (must be set in `config.yaml`)
 
 ### Fastest Deployment (Automated - Recommended)
 
-**For local testing with minikube, everything is automated in one command:**
-
+**1. Create config file:**
 ```bash
-# 1. Setup minikube (enables required addons)
+make config
+```
+
+**2. Configure deployment mode:**
+
+**For Local Mode (default):**
+```yaml
+teleport:
+  proxy_addr: ""  # Empty = local mode
+  cluster_name: "minikube"
+  join_token: ""  # Auto-generated
+```
+
+**For Enterprise Mode:**
+```yaml
+teleport:
+  proxy_addr: "your-proxy.teleport.com:443"  # Set = Enterprise mode
+  cluster_name: "your-cluster-name"
+  cluster_namespace: "teleport-cluster"  # Not used in Enterprise mode
+  agent_namespace: "teleport-agent"
+```
+
+**Note:** For Enterprise Mode, the join token is auto-generated via `tctl` if it's installed and configured. If `tctl` is not found, it will be automatically installed. You must authenticate to your Teleport Enterprise cluster first using:
+```bash
+tsh login --user=YOUR_USER --proxy=your-proxy.teleport.com:443 --auth local
+```
+⚠️ **MFA WARNING**: Use an authenticator app (TOTP) for MFA, not passkeys. Passkeys stored in web browsers are not accessible to `tsh` and can cause authentication issues. See: https://github.com/gravitational/teleport/issues/44600
+
+**3. Deploy:**
+```bash
+# For local mode, setup minikube first
 make setup-minikube
 
-# 2. Deploy everything (one command does it all!)
+# Deploy everything
 make helm-deploy
 ```
 
-**That's it!** The `make helm-deploy` command automatically:
+**What `make helm-deploy` does:**
+
+**Local Mode:**
 1. ✅ Checks prerequisites (minikube addons, DNS mappings)
 2. ✅ Deploys RBAC resources
 3. ✅ Deploys Teleport server to Kubernetes
 4. ✅ Creates admin user with Kubernetes access
-5. ✅ Generates join token
+5. ✅ Generates join token automatically
 6. ✅ Deploys Kubernetes Dashboard
 7. ✅ Deploys Teleport agent with discovery enabled
-8. ✅ Patches service to add port 8080
-9. ✅ Starts port-forward to `localhost:8080`
+
+**Enterprise Mode:**
+1. ✅ Deploys RBAC resources
+2. ✅ Generates join token via `tctl` (auto-installs `tctl` if needed)
+3. ✅ Deploys Kubernetes Dashboard
+4. ✅ Deploys Teleport agent with static app configuration (no discovery)
 
 **Next steps:**
-- Access Teleport Web UI: `https://teleport-cluster.teleport-cluster.svc.cluster.local:8080`
-- Accept the admin invite URL shown in the summary
+- **Local Mode**: Access Teleport Web UI at `https://teleport-cluster.teleport-cluster.svc.cluster.local:443`
+- **Enterprise Mode**: Access your Teleport Enterprise/Cloud instance
 - Get dashboard tokens: `make get-tokens`
 - Access dashboard via Teleport: Applications → dashboard
 
@@ -94,25 +144,31 @@ make helm-clean
 
 ## 📋 Prerequisites
 
-### Required
-- **Minikube**: For local development/testing
-- **kubectl**: Configured to access your cluster
-- **helm**: Version 3.x installed
+### Required (All Modes)
+- `kubectl`: Configured to access your cluster
+- `helm`: Version 3.x installed
+
+### Local Mode Only
+- **Minikube**: Installed and running
 - **macOS/Linux**: For `/etc/hosts` modification
+- **Minikube Addons**: Automatically enabled by the setup:
+  - `ingress` addon
+  - `ingress-dns` addon
+- **DNS Mappings**: Required in `/etc/hosts` (checked automatically):
+  ```
+  127.0.0.1 teleport-cluster.teleport-cluster.svc.cluster.local
+  127.0.0.1 dashboard.teleport-cluster.teleport-cluster.svc.cluster.local
+  ```
+  The `make helm-deploy` command will check for these and fail if they're missing.
 
-### Minikube Addons
-The setup automatically enables:
-- `ingress` addon
-- `ingress-dns` addon
-
-### DNS Mappings
-The setup requires these entries in `/etc/hosts`:
-```
-127.0.0.1 teleport-cluster.teleport-cluster.svc.cluster.local
-127.0.0.1 dashboard.teleport-cluster.teleport-cluster.svc.cluster.local
-```
-
-The `make helm-deploy` command will check for these and fail if they're missing.
+### Enterprise Mode Only
+- **Teleport Enterprise/Cloud**: Existing instance accessible
+- **Authentication**: Must authenticate to Teleport Enterprise cluster before deployment:
+  ```bash
+  tsh login --user=YOUR_USER --proxy=your-proxy.teleport.com:443 --auth local
+  ```
+  ⚠️ **MFA WARNING**: Use an authenticator app (TOTP) for MFA, not passkeys. See: https://github.com/gravitational/teleport/issues/44600
+- **Join Token**: Auto-generated via `tctl` (auto-installed if not found)
 
 ---
 
@@ -120,24 +176,29 @@ The `make helm-deploy` command will check for these and fail if they're missing.
 
 The solution consists of:
 
-1. **Teleport Cluster**: 
+1. **Teleport Cluster** (Local Mode Only): 
    - Deployed via official Helm chart
    - Runs in `teleport-cluster` namespace
-   - Web UI on port 8080, tunnel on port 443
+   - Web UI on port 443
    - Self-signed certificates for local testing
 
 2. **Kubernetes Dashboard**: 
    - Deployed via official Helm chart
    - Runs in `kubernetes-dashboard` namespace
    - Exposed via ClusterIP service (internal only)
-   - Annotated for Teleport discovery
+   - Automatically discovered by Teleport via discovery service
 
 3. **Teleport Kube Agent**:
    - Deployed via Teleport Helm chart
    - Runs in `teleport-agent` namespace
    - Registers Kubernetes cluster with Teleport
-   - Discovers and registers dashboard application
-   - Roles: `kube,app,discovery`
+   - **Local Mode**: Discovers and registers dashboard application via discovery service
+     - Roles: `kube,app,discovery`
+     - Filters discovery by namespace (only discovers services in `kubernetes-dashboard` namespace)
+   - **Enterprise Mode**: Uses static app configuration
+     - Roles: `kube,app` (no discovery)
+     - Static app pointing to `kubernetes-dashboard-kong-proxy` ClusterIP
+     - `insecure_skip_verify: true` for self-signed certificates
 
 4. **RBAC Resources**:
    - `dashboard-admin-account`: ServiceAccount with cluster-admin role
@@ -150,7 +211,7 @@ The solution consists of:
 │  ┌───────────────────────────────────┐  │
 │  │  Teleport Cluster                 │  │
 │  │  - Auth Service                   │  │
-│  │  - Proxy Service (8080/443)        │  │
+│  │  - Proxy Service (443)              │  │
 │  └───────────────────────────────────┘  │
 │  ┌───────────────────────────────────┐  │
 │  │  Kubernetes Dashboard             │  │
@@ -163,7 +224,7 @@ The solution consists of:
 │  └───────────────────────────────────┘  │
 └─────────────────────────────────────────┘
            │
-           │ Port Forward (8080:8080)
+           │ Port Forward (443:443) - Local Mode Only
            │
 ┌─────────────────────────────────────────┐
 │  User Browser                            │
@@ -178,21 +239,56 @@ The solution consists of:
 
 ### Configuration Setup
 
-The setup uses default values for local testing. You can customize via `config.yaml`:
+The setup supports two deployment modes based on `proxy_addr` in `config.yaml`:
 
 ```bash
-# Create config file (optional)
+# Create config file
 make config
 ```
 
-Edit `config.yaml` if needed:
+#### Local Mode Configuration
+
+For local testing with Minikube (deploys Teleport cluster):
+
 ```yaml
 teleport:
-  namespace: "teleport-agent"  # Default: teleport-agent
+  proxy_addr: ""  # Empty = local mode
+  cluster_name: "minikube"
+  join_token: ""  # Auto-generated if empty
+  namespace: "teleport-agent"
 
 kubernetes:
-  namespace: "kubernetes-dashboard"  # Default: kubernetes-dashboard
+  namespace: "kubernetes-dashboard"
 ```
+
+**What happens:**
+- Teleport cluster is deployed to Kubernetes
+- Admin user is created automatically
+- Join token is generated automatically
+- Prerequisites are checked (minikube addons, DNS mappings)
+
+#### Enterprise Mode Configuration
+
+For connecting to existing Teleport Enterprise/Cloud:
+
+```yaml
+teleport:
+  proxy_addr: "your-proxy.teleport.com:443"  # Set = Enterprise mode
+  cluster_name: "your-cluster-name"
+  cluster_namespace: "teleport-cluster"  # Not used in Enterprise mode
+  agent_namespace: "teleport-agent"
+
+kubernetes:
+  namespace: "kubernetes-dashboard"
+```
+
+**What happens:**
+- Teleport cluster is NOT deployed (uses existing)
+- `tctl` is auto-installed if not found
+- `tctl` is configured to use proxy from `config.yaml`
+- Join token is auto-generated via `tctl` (requires authentication first)
+- Agent uses static app configuration (no discovery)
+- Prerequisites check is skipped (no minikube/DNS requirements)
 
 ### Automated Deployment
 
@@ -201,28 +297,34 @@ kubernetes:
 make helm-deploy
 ```
 
-This will:
+**Local Mode Steps:**
 1. Check prerequisites (minikube addons, DNS mappings)
 2. Deploy RBAC resources
 3. Deploy Teleport cluster with:
    - `clusterName: minikube`
    - `proxyListenerMode: multiplex`
-   - `publicAddr: teleport-cluster.teleport-cluster.svc.cluster.local:8080`
-   - `tunnelPublicAddr: teleport-cluster.teleport-cluster.svc.cluster.local:443`
-   - `extraArgs: ["--insecure"]`
+   - `publicAddr: teleport-cluster.teleport-cluster.svc.cluster.local:443`
 4. Create admin user with `k8s-admin` role
 5. Generate join token with `kube,app,discovery` roles
 6. Deploy Kubernetes Dashboard
-7. Annotate dashboard service for Teleport discovery
-8. Deploy Teleport Kube Agent with:
+7. Deploy Teleport Kube Agent with:
    - `roles: kube,app,discovery`
-   - `insecureSkipProxyTLSVerify: true`
-   - Discovery configuration
-9. Patch Teleport service to add port 8080
-10. Restart agent pods
-11. Start port-forward to `localhost:8080`
+   - Discovery configuration (filters by namespace)
 
-**Note:** Step 2 (Teleport deployment) may take up to 5 minutes while the Helm chart deploys and pods become ready.
+**Enterprise Mode Steps:**
+1. Deploy RBAC resources
+2. Generate join token:
+   - Auto-installs `tctl` if not found
+   - Configures `tctl` to use proxy from `config.yaml`
+   - Generates token with `kube,app` roles (no discovery)
+   - Requires authentication: `tsh login --user=YOUR_USER --proxy=PROXY --auth local`
+3. Deploy Kubernetes Dashboard
+4. Deploy Teleport Kube Agent with:
+   - `roles: kube,app` (static configuration, no discovery)
+   - Static app configuration pointing to `kubernetes-dashboard-kong-proxy` ClusterIP
+   - `insecure_skip_verify: true` for self-signed certificates
+
+**Note:** Teleport cluster deployment (Local Mode, Step 3) may take up to 5 minutes while the Helm chart deploys and pods become ready.
 
 ---
 
@@ -240,8 +342,9 @@ This will display:
 
 ### Step 2: Access via Teleport
 
+**For Local Mode:**
 1. **Access Teleport Web UI**
-   - URL: `https://teleport-cluster.teleport-cluster.svc.cluster.local:8080`
+   - URL: `https://teleport-cluster.teleport-cluster.svc.cluster.local:443`
    - Accept the self-signed certificate warning (expected for local testing)
 
 2. **Accept Admin Invite**
@@ -254,6 +357,19 @@ This will display:
 
 4. **Open Dashboard**
    - Click on the `dashboard` application
+   - Teleport will open the dashboard in a new window/tab
+
+**For Enterprise Mode:**
+1. **Access Teleport Web UI**
+   - Use your Teleport Enterprise/Cloud URL (from `config.yaml`)
+   - Log in with your existing credentials
+
+2. **Navigate to Applications**
+   - Click on **Applications** in the sidebar
+   - You should see the `kube-dashboard` application (configured statically)
+
+3. **Open Dashboard**
+   - Click on the `kube-dashboard` application
    - Teleport will open the dashboard in a new window/tab
 
 5. **Authenticate with Dashboard**
@@ -280,11 +396,7 @@ clusterName: minikube
 proxyListenerMode: multiplex
 acme: false
 publicAddr:
-  - teleport-cluster.teleport-cluster.svc.cluster.local:8080
-tunnelPublicAddr:
   - teleport-cluster.teleport-cluster.svc.cluster.local:443
-extraArgs:
-- "--insecure"
 auth:
   service:
     enabled: true
@@ -293,11 +405,9 @@ auth:
 
 ### Teleport Kube Agent Configuration
 
-The agent is configured with:
-
+**Local Mode:**
 ```yaml
 roles: kube,app,discovery
-insecureSkipProxyTLSVerify: true
 updater:
   enabled: false
 kubernetesDiscovery:
@@ -305,21 +415,24 @@ kubernetesDiscovery:
     - app
     namespaces:
     - kubernetes-dashboard
-appResources:
-  - labels:
-      app.kubernetes.io/name: kong
-      app.kubernetes.io/instance: kubernetes-dashboard
 ```
 
-### Dashboard Service Annotations
-
-The dashboard service is annotated for Teleport discovery:
-
+**Enterprise Mode:**
 ```yaml
-teleport.dev/name: dashboard
-teleport.dev/protocol: https
-teleport.dev/ignore-tls: true
+roles: kube,app
+updater:
+  enabled: false
+apps:
+  - name: kube-dashboard
+    uri: https://{CLUSTER_IP}
+    insecure_skip_verify: true
+    labels:
+      cluster: {CLUSTER_NAME}
 ```
+
+**Note:** 
+- **Local Mode**: The dashboard service is automatically discovered by Teleport's discovery service. No manual annotations or service patching is required.
+- **Enterprise Mode**: Uses static app configuration pointing directly to the `kubernetes-dashboard-kong-proxy` service ClusterIP. Discovery is disabled.
 
 ---
 
@@ -399,17 +512,16 @@ If a static token leaks, an attacker can register a malicious node to the cluste
   - **AWS:** IAM Joining (Node Identity).
   - **Kubernetes:** Token Review API / Teleport Operator.
 
-**🟠 Risk: "Split-Brain" Configuration**
+**🟠 Risk: Local Development Configuration**
 
 **Configuration:**
-- Browser Traffic: Port `8080`.
-- Agent Traffic: Port `443`.
-- Requires manual Service patching (`kubectl patch service...`) to function.
+- Single port configuration (443) for all traffic
+- Local DNS mappings via `/etc/hosts`
+- Self-signed certificates for local testing
 
 **Impact:**
-High risk of configuration drift. Upgrading the Helm chart will wipe the manual Service patch, causing an immediate outage for all Agents.
-
-- **Production Requirement:** Unified port configuration (443 only) managed strictly via Infrastructure-as-Code (Helm/Terraform) without manual `kubectl` patches.
+- **Portability:** Configuration is specific to local development environment
+- **Production Requirement:** Use proper DNS resolution and valid certificates (Let's Encrypt/ACME) for production deployments
 
 #### 4. Remediation Plan (Path to Production)
 
@@ -464,19 +576,19 @@ To move from **Sandbox** to **Production**, the following refactoring is mandato
 **Issue**: Port-forward fails to start
 
 **Solutions:**
-1. Check if port 8080 is already in use:
+1. Check if port 443 is already in use (Local Mode):
    ```bash
-   lsof -i :8080
+   lsof -i :443
    ```
 
-2. Check if the service has port 8080:
+2. Check if the service has port 443:
    ```bash
    kubectl get svc -n teleport-cluster teleport-cluster -o yaml | grep -A 5 ports
    ```
 
-3. Manually start port-forward:
+3. For Local Mode, manually start port-forward:
    ```bash
-   kubectl port-forward -n teleport-cluster svc/teleport-cluster 8080:8080
+   kubectl port-forward -n teleport-cluster svc/teleport-cluster 443:443
    ```
 
 ### Dashboard Not Appearing in Teleport
@@ -489,19 +601,20 @@ To move from **Sandbox** to **Production**, the following refactoring is mandato
    kubectl logs -n teleport-agent -l app.kubernetes.io/name=teleport-kube-agent
    ```
 
-2. Verify service annotations:
-   ```bash
-   kubectl get svc -n kubernetes-dashboard kubernetes-dashboard-kong-proxy -o yaml | grep teleport.dev
-   ```
-
-3. Check if discovery is enabled:
+2. Verify discovery is enabled and filtering correctly:
    ```bash
    kubectl get pods -n teleport-agent -l app.kubernetes.io/name=teleport-kube-agent
+   kubectl get svc -n kubernetes-dashboard
    ```
 
-### Cannot Access Teleport Web UI
+3. Check if dashboard service exists:
+   ```bash
+   kubectl get svc -n kubernetes-dashboard kubernetes-dashboard-kong-proxy
+   ```
 
-**Issue**: Can't access `https://teleport-cluster.teleport-cluster.svc.cluster.local:8080`
+### Cannot Access Teleport Web UI (Local Mode)
+
+**Issue**: Can't access `https://teleport-cluster.teleport-cluster.svc.cluster.local:443`
 
 **Solutions:**
 1. Check `/etc/hosts` has the DNS mapping:
@@ -509,15 +622,12 @@ To move from **Sandbox** to **Production**, the following refactoring is mandato
    grep teleport-cluster /etc/hosts
    ```
 
-2. Check if port-forward is running:
-   ```bash
-   pgrep -f "kubectl port-forward.*teleport.*8080"
-   ```
-
-3. Check Teleport pods are running:
+2. Check Teleport pods are running:
    ```bash
    kubectl get pods -n teleport-cluster
    ```
+
+3. For Enterprise Mode, verify your proxy address is correct in `config.yaml`
 
 ### Teleport Agent Not Starting
 
@@ -529,14 +639,15 @@ To move from **Sandbox** to **Production**, the following refactoring is mandato
    kubectl logs -n teleport-agent -l app.kubernetes.io/name=teleport-kube-agent
    ```
 
-2. Verify service has port 8080 (agent needs it):
+2. Verify join token is set (Enterprise Mode):
    ```bash
-   kubectl get svc -n teleport-cluster teleport-cluster
+   grep join_token config.yaml
    ```
 
-3. Check if service patching succeeded:
+3. Check if proxy address is reachable:
    ```bash
-   kubectl get svc -n teleport-cluster teleport-cluster -o yaml | grep -A 10 ports
+   # For Enterprise Mode, verify proxy address
+   grep proxy_addr config.yaml
    ```
 
 ### Prerequisites Check Failing
@@ -567,18 +678,18 @@ make helm-clean
 ```
 
 This will:
-- Stop port-forward
+- Stop port-forward (if running)
 - Uninstall Teleport Kube Agent
 - Uninstall Kubernetes Dashboard
-- Uninstall Teleport Cluster
+- Uninstall Teleport Cluster (Local Mode only)
 - Remove namespaces
 - Clean up RBAC resources
 
 ### Manual Cleanup
 
 ```bash
-# Stop port-forward
-pkill -f "kubectl port-forward.*teleport.*8080"
+# Stop port-forward (Local Mode)
+pkill -f "kubectl port-forward.*teleport.*443"
 
 # Remove Helm releases
 helm uninstall teleport-agent --namespace teleport-agent
