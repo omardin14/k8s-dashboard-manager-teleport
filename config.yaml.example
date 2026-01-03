@@ -3,12 +3,12 @@
 # Teleport Configuration
 teleport:
   # Teleport Proxy endpoint
-  # Leave EMPTY for local setup (deploys Teleport cluster in minikube)
-  # Set to your Teleport Enterprise/Cloud proxy for Enterprise mode
-  # Format: "hostname:port" or "hostname" (port 443 will be added automatically)
-  # Examples: "example.teleport.com:443" or "example.teleport.com" or "https://example.teleport.com"
+  # For local setup (deploys Teleport cluster in minikube): Use empty string ""
+  # For Enterprise mode: Must start with "https://"
+  # Format: "https://hostname:port" or "https://hostname" (port 443 will be added automatically if missing)
+  # Examples: "https://example.teleport.com:443" or "https://example.teleport.com"
   # Sign up for Teleport Enterprise: https://goteleport.com/signup/
-  proxy_addr: ""
+  proxy_addr: ""  # Use "" for local mode, or "https://your-proxy.teleport.com:443" for Enterprise mode
   
   # Kubernetes cluster name in Teleport
   cluster_name: "minikube"

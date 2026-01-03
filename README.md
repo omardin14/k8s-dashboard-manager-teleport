@@ -61,7 +61,8 @@ make config
 teleport:
   proxy_addr: ""  # Empty = local mode
   cluster_name: "minikube"
-  join_token: ""  # Auto-generated
+  cluster_namespace: "teleport-cluster"
+  agent_namespace: "teleport-agent"
 ```
 
 **For Enterprise Mode:**
@@ -109,7 +110,7 @@ make helm-deploy
 - **Local Mode**: Access Teleport Web UI at `https://teleport-cluster.teleport-cluster.svc.cluster.local:443`
 - **Enterprise Mode**: Access your Teleport Enterprise/Cloud instance
 - Get dashboard tokens: `make get-tokens`
-- Access dashboard via Teleport: Applications → dashboard
+- Access dashboard via Teleport: Applications → `dashboard` (Local Mode) or `kube-dashboard` (Enterprise Mode)
 
 **To clean up everything:**
 ```bash
@@ -254,8 +255,8 @@ For local testing with Minikube (deploys Teleport cluster):
 teleport:
   proxy_addr: ""  # Empty = local mode
   cluster_name: "minikube"
-  join_token: ""  # Auto-generated if empty
-  namespace: "teleport-agent"
+  cluster_namespace: "teleport-cluster"
+  agent_namespace: "teleport-agent"
 
 kubernetes:
   namespace: "kubernetes-dashboard"
@@ -353,7 +354,7 @@ This will display:
 
 3. **Navigate to Applications**
    - Click on **Applications** in the sidebar
-   - You should see the `dashboard` application (discovered automatically)
+   - You should see the `dashboard` application (discovered automatically via discovery service)
 
 4. **Open Dashboard**
    - Click on the `dashboard` application
@@ -639,9 +640,13 @@ To move from **Sandbox** to **Production**, the following refactoring is mandato
    kubectl logs -n teleport-agent -l app.kubernetes.io/name=teleport-kube-agent
    ```
 
-2. Verify join token is set (Enterprise Mode):
+2. Verify authentication and token generation (Enterprise Mode):
    ```bash
-   grep join_token config.yaml
+   # Check if authenticated
+   tctl status
+   
+   # If not authenticated, login first
+   tsh login --user=YOUR_USER --proxy=your-proxy.teleport.com:443 --auth local
    ```
 
 3. Check if proxy address is reachable:
