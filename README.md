@@ -2,10 +2,12 @@
 
 A complete Kubernetes solution that deploys the Kubernetes Dashboard and makes it accessible via Teleport Application Access with both admin and readonly access roles.
 
-![Status](https://img.shields.io/badge/status-sandbox-yellow)
+![Status](https://img.shields.io/badge/status-ready-green)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
-> ⚠️ **Note:** This setup is designed for local development/testing only. See the [Security](#-security) section for important security considerations.
+> ⚠️ **Note:** **Local Mode** (Teleport Community) is designed for local development/testing only. See the [Security](#-security) section for important security considerations.
+> 
+> **Enterprise Mode** connects to existing Teleport Enterprise/Cloud instances and is suitable for production use.
 
 ## 📑 Table of Contents
 
@@ -29,8 +31,17 @@ A complete Kubernetes solution that deploys the Kubernetes Dashboard and makes i
 
 The setup supports two deployment modes based on `proxy_addr` in `config.yaml`:
 
-1. **Local Mode** (`proxy_addr: ""`): Deploys Teleport cluster in Kubernetes (Minikube)
-2. **Enterprise Mode** (`proxy_addr: "your-proxy.teleport.com:443"`): Connects to existing Teleport Enterprise/Cloud
+1. **Local Mode** (`proxy_addr: ""`): 
+   - Deploys Teleport Community cluster in Kubernetes (Minikube)
+   - ⚠️ **For local development/testing only** - See [Security](#-security) section
+   - Uses self-signed certificates and insecure flags
+   - Requires `/etc/hosts` modifications and port-forwarding
+
+2. **Enterprise Mode** (`proxy_addr: "your-proxy.teleport.com:443"`): 
+   - Connects to existing Teleport Enterprise/Cloud instance
+   - ✅ **Suitable for production use**
+   - Uses proper TLS certificates and secure configuration
+   - No local modifications required
 
 ### Prerequisites
 
@@ -505,7 +516,9 @@ apps:
 ### ⚠️ Security Risk Assessment
 
 **Current Status:** 🔴 **CRITICAL RISK (Not Production Ready)**
-**Scope:** Local Minikube development environment only.
+**Scope:** **Local Mode (Teleport Community)** only - Local Minikube development environment.
+
+**Enterprise Mode:** ✅ Uses existing Teleport Enterprise/Cloud with proper security configurations and is suitable for production use.
 
 This architecture deliberately bypasses standard security controls (TLS validation, DNS resolution, HA storage) to function within a single-node, air-gapped local environment. Deploying this configuration to a shared or public network exposes the infrastructure to Man-in-the-Middle (MitM) attacks, data loss, and denial of service.
 
