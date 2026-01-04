@@ -2,10 +2,12 @@
 
 A complete Kubernetes solution that deploys the Kubernetes Dashboard and makes it accessible via Teleport Application Access with both admin and readonly access roles.
 
-![Status](https://img.shields.io/badge/status-sandbox-yellow)
+![Status](https://img.shields.io/badge/status-ready-green)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
-> ⚠️ **Note:** This setup is designed for local development/testing only. See the [Security](#-security) section for important security considerations.
+> ⚠️ **Note:** **Local Mode** (Teleport Community) is designed for local development/testing only. See the [Security](#-security) section for important security considerations.
+> 
+> **Enterprise Mode** connects to existing Teleport Enterprise/Cloud instances and is suitable for production use.
 
 ## 📑 Table of Contents
 
@@ -29,8 +31,17 @@ A complete Kubernetes solution that deploys the Kubernetes Dashboard and makes i
 
 The setup supports two deployment modes based on `proxy_addr` in `config.yaml`:
 
-1. **Local Mode** (`proxy_addr: ""`): Deploys Teleport cluster in Kubernetes (Minikube)
-2. **Enterprise Mode** (`proxy_addr: "your-proxy.teleport.com:443"`): Connects to existing Teleport Enterprise/Cloud
+1. **Local Mode** (`proxy_addr: ""`): 
+   - Deploys Teleport Community cluster in Kubernetes (Minikube)
+   - ⚠️ **For local development/testing only** - See [Security](#-security) section
+   - Uses self-signed certificates and insecure flags
+   - Requires `/etc/hosts` modifications and port-forwarding
+
+2. **Enterprise Mode** (`proxy_addr: "your-proxy.teleport.com:443"`): 
+   - Connects to existing Teleport Enterprise/Cloud instance
+   - ✅ **Suitable for production use**
+   - Uses proper TLS certificates and secure configuration
+   - No local modifications required
 
 ### Prerequisites
 
@@ -91,23 +102,22 @@ make helm-deploy
 
 **What `make helm-deploy` does:**
 
-**Local Mode:**
+**Local Mode (5 steps):**
 1. ✅ Checks prerequisites (minikube addons, DNS mappings)
 2. ✅ Deploys RBAC resources
 3. ✅ Deploys Teleport server to Kubernetes
 4. ✅ Creates admin user with Kubernetes access
 5. ✅ Generates join token automatically
-6. ✅ Deploys Kubernetes Dashboard
-7. ✅ Deploys Teleport agent with discovery enabled
+6. ✅ Deploys Kubernetes Dashboard and Teleport agent with discovery enabled
 
-**Enterprise Mode:**
+**Enterprise Mode (4 steps):**
 1. ✅ Deploys RBAC resources
-2. ✅ Generates join token via `tctl` (auto-installs `tctl` if needed)
-3. ✅ Deploys Kubernetes Dashboard
-4. ✅ Deploys Teleport agent with static app configuration (no discovery)
+2. ✅ Sets up tctl (auto-installs `tctl` if needed)
+3. ✅ Generates join token via `tctl`
+4. ✅ Deploys Kubernetes Dashboard and Teleport agent with static app configuration (no discovery)
 
 **Next steps:**
-- **Local Mode**: Access Teleport Web UI at `https://teleport-cluster.teleport-cluster.svc.cluster.local:443`
+- **Local Mode**: Access Teleport Web UI at `https://teleport-cluster.teleport-cluster.svc.cluster.local:8080` (port-forward started automatically)
 - **Enterprise Mode**: Access your Teleport Enterprise/Cloud instance
 - Get dashboard tokens: `make get-tokens`
 - Access dashboard via Teleport: Applications → `dashboard` (Local Mode) or `kube-dashboard` (Enterprise Mode)
@@ -148,6 +158,8 @@ make helm-clean
 ### Required (All Modes)
 - `kubectl`: Configured to access your cluster
 - `helm`: Version 3.x installed
+- `python3`: Python 3.7+ installed
+- `pyyaml`: Python YAML library (installed via `pip install -r src/requirements.txt`)
 
 ### Local Mode Only
 - **Minikube**: Installed and running
@@ -175,19 +187,49 @@ make helm-clean
 
 ## 🏗️ Architecture
 
+### Project Structure
+
+The project uses a Python-based deployment system with modular components:
+
+```
+src/
+├── main.py              # Single entry point for all commands (deploy, clean, utils)
+├── requirements.txt     # Python dependencies
+├── deploy/              # Deployment module
+│   ├── __init__.py      # Orchestrates local/enterprise deployment
+│   ├── common.py        # Shared functions (RBAC, Dashboard, Agent, StepCounter)
+│   ├── local.py         # Local mode specific functions
+│   └── enterprise.py    # Enterprise mode specific functions
+├── utils/               # Utility functions
+│   └── __init__.py      # Token retrieval, status, logs, etc.
+└── clean/               # Cleanup functions
+    └── __init__.py      # Cleanup operations
+```
+
+**Commands available via `main.py`:**
+- `deploy` (or no args) - Deploy Teleport, Dashboard, and Agent
+- `clean` - Clean up all deployed resources
+- `get-tokens` - Get dashboard access tokens
+- `get-clusterip` - Get dashboard ClusterIP
+- `status` - Show overall status
+- `helm-status` - Show Helm deployment status
+- `logs` - Interactive menu to view logs
+
+### Deployment Components
+
 The solution consists of:
 
 1. **Teleport Cluster** (Local Mode Only): 
    - Deployed via official Helm chart
    - Runs in `teleport-cluster` namespace
-   - Web UI on port 443
+   - Web UI on port 8080 (via port-forward)
    - Self-signed certificates for local testing
 
 2. **Kubernetes Dashboard**: 
    - Deployed via official Helm chart
    - Runs in `kubernetes-dashboard` namespace
    - Exposed via ClusterIP service (internal only)
-   - Automatically discovered by Teleport via discovery service
+   - Automatically discovered by Teleport via discovery service (Local Mode)
 
 3. **Teleport Kube Agent**:
    - Deployed via Teleport Helm chart
@@ -237,6 +279,20 @@ The solution consists of:
 ---
 
 ## 📦 Deployment
+
+### Installation
+
+Python dependencies are automatically installed when you run any Makefile command. The Makefile will:
+1. Check if a virtual environment (`venv`) exists
+2. If not, automatically create it and install dependencies
+3. Use the virtual environment for all Python commands
+
+**Manual installation (optional):**
+```bash
+make install
+```
+
+This creates a virtual environment and installs dependencies from `src/requirements.txt`.
 
 ### Configuration Setup
 
@@ -293,39 +349,56 @@ kubernetes:
 
 ### Automated Deployment
 
+The deployment is handled by a single Python entry point (`src/main.py`) called via Makefile targets:
+
 ```bash
 # Deploy everything
 make helm-deploy
 ```
 
-**Local Mode Steps:**
-1. Check prerequisites (minikube addons, DNS mappings)
-2. Deploy RBAC resources
-3. Deploy Teleport cluster with:
+This runs `python3 src/main.py deploy`, which orchestrates the deployment using the modular Python structure:
+- **`src/main.py`**: Single entry point for all commands (deploy, clean, utilities)
+- **`src/deploy/common.py`**: Shared deployment functions (RBAC, Dashboard, Agent common parts, StepCounter)
+- **`src/deploy/local.py`**: Local mode specific functions (Teleport cluster, admin user, token generation)
+- **`src/deploy/enterprise.py`**: Enterprise mode specific functions (tctl setup, token generation)
+
+**Note:** Step numbers are dynamically calculated based on the deployment mode:
+- **Local Mode**: Shows "Step X/5" (5 total steps)
+- **Enterprise Mode**: Shows "Step X/4" (4 total steps)
+
+**Local Mode Steps (5 total):**
+1. **Step 1/5**: Deploy RBAC resources - `deploy/common.py`
+2. **Step 2/5**: Deploy Teleport cluster - `deploy/local.py`
    - `clusterName: minikube`
    - `proxyListenerMode: multiplex`
-   - `publicAddr: teleport-cluster.teleport-cluster.svc.cluster.local:443`
-4. Create admin user with `k8s-admin` role
-5. Generate join token with `kube,app,discovery` roles
-6. Deploy Kubernetes Dashboard
-7. Deploy Teleport Kube Agent with:
-   - `roles: kube,app,discovery`
+   - `publicAddr: teleport-cluster.teleport-cluster.svc.cluster.local:8080`
+   - `tunnelPublicAddr: teleport-cluster.teleport-cluster.svc.cluster.local:443`
+3. **Step 3/5**: Create admin user with `k8s-admin` role - `deploy/local.py`
+4. **Step 4/5**: Generate join token with `kube,app,discovery` roles - `deploy/local.py`
+5. **Step 5/5**: Deploy Kubernetes Dashboard and Teleport Kube Agent - `deploy/common.py`
+   - Dashboard deployment
+   - Agent with `roles: kube,app,discovery`
    - Discovery configuration (filters by namespace)
+   - Patch service and start port-forward - `deploy/local.py`
 
-**Enterprise Mode Steps:**
-1. Deploy RBAC resources
-2. Generate join token:
+**Enterprise Mode Steps (4 total):**
+1. **Step 1/4**: Deploy RBAC resources - `deploy/common.py`
+2. **Step 2/4**: Setup tctl - `deploy/enterprise.py`
    - Auto-installs `tctl` if not found
    - Configures `tctl` to use proxy from `config.yaml`
-   - Generates token with `kube,app` roles (no discovery)
    - Requires authentication: `tsh login --user=YOUR_USER --proxy=PROXY --auth local`
-3. Deploy Kubernetes Dashboard
-4. Deploy Teleport Kube Agent with:
-   - `roles: kube,app` (static configuration, no discovery)
+3. **Step 3/4**: Generate join token - `deploy/enterprise.py`
+   - Generates token with `kube,app` roles (no discovery)
+4. **Step 4/4**: Deploy Kubernetes Dashboard and Teleport Kube Agent - `deploy/common.py`
+   - Dashboard deployment
+   - Agent with `roles: kube,app` (static configuration, no discovery)
    - Static app configuration pointing to `kubernetes-dashboard-kong-proxy` ClusterIP
    - `insecure_skip_verify: true` for self-signed certificates
 
-**Note:** Teleport cluster deployment (Local Mode, Step 3) may take up to 5 minutes while the Helm chart deploys and pods become ready.
+**Note:** 
+- Teleport cluster deployment (Local Mode, Step 2/5) may take up to 5 minutes while the Helm chart deploys and pods become ready.
+- Step numbers are dynamically calculated and displayed correctly for each mode (Local: 5 steps, Enterprise: 4 steps).
+- All Python commands automatically install dependencies in a virtual environment if needed.
 
 ---
 
@@ -337,7 +410,7 @@ make helm-deploy
 make get-tokens
 ```
 
-This will display:
+This runs `python3 src/main.py get-tokens` and displays:
 - **Admin Token**: For full cluster access
 - **Readonly Token**: For read-only access
 
@@ -345,8 +418,9 @@ This will display:
 
 **For Local Mode:**
 1. **Access Teleport Web UI**
-   - URL: `https://teleport-cluster.teleport-cluster.svc.cluster.local:443`
+   - URL: `https://teleport-cluster.teleport-cluster.svc.cluster.local:8080` (via port-forward)
    - Accept the self-signed certificate warning (expected for local testing)
+   - Port-forward is automatically started by `make helm-deploy`
 
 2. **Accept Admin Invite**
    - Use the invite URL shown in the deployment summary
@@ -442,7 +516,9 @@ apps:
 ### ⚠️ Security Risk Assessment
 
 **Current Status:** 🔴 **CRITICAL RISK (Not Production Ready)**
-**Scope:** Local Minikube development environment only.
+**Scope:** **Local Mode (Teleport Community)** only - Local Minikube development environment.
+
+**Enterprise Mode:** ✅ Uses existing Teleport Enterprise/Cloud with proper security configurations and is suitable for production use.
 
 This architecture deliberately bypasses standard security controls (TLS validation, DNS resolution, HA storage) to function within a single-node, air-gapped local environment. Deploying this configuration to a shared or public network exposes the infrastructure to Man-in-the-Middle (MitM) attacks, data loss, and denial of service.
 
@@ -577,19 +653,24 @@ To move from **Sandbox** to **Production**, the following refactoring is mandato
 **Issue**: Port-forward fails to start
 
 **Solutions:**
-1. Check if port 443 is already in use (Local Mode):
+1. Check if port 8080 is already in use (Local Mode):
    ```bash
-   lsof -i :443
+   lsof -i :8080
    ```
 
-2. Check if the service has port 443:
+2. Check if the service has port 8080:
    ```bash
    kubectl get svc -n teleport-cluster teleport-cluster -o yaml | grep -A 5 ports
    ```
 
 3. For Local Mode, manually start port-forward:
    ```bash
-   kubectl port-forward -n teleport-cluster svc/teleport-cluster 443:443
+   kubectl port-forward -n teleport-cluster svc/teleport-cluster 8080:8080
+   ```
+
+4. Check port-forward logs:
+   ```bash
+   cat /tmp/teleport-port-forward.log
    ```
 
 ### Dashboard Not Appearing in Teleport
@@ -615,20 +696,30 @@ To move from **Sandbox** to **Production**, the following refactoring is mandato
 
 ### Cannot Access Teleport Web UI (Local Mode)
 
-**Issue**: Can't access `https://teleport-cluster.teleport-cluster.svc.cluster.local:443`
+**Issue**: Can't access `https://teleport-cluster.teleport-cluster.svc.cluster.local:8080`
 
 **Solutions:**
-1. Check `/etc/hosts` has the DNS mapping:
+1. Check if port-forward is running:
+   ```bash
+   pgrep -f "kubectl port-forward.*teleport.*8080"
+   ```
+
+2. Check `/etc/hosts` has the DNS mapping:
    ```bash
    grep teleport-cluster /etc/hosts
    ```
 
-2. Check Teleport pods are running:
+3. Check Teleport pods are running:
    ```bash
    kubectl get pods -n teleport-cluster
    ```
 
-3. For Enterprise Mode, verify your proxy address is correct in `config.yaml`
+4. Manually start port-forward if needed:
+   ```bash
+   kubectl port-forward -n teleport-cluster svc/teleport-cluster 8080:8080
+   ```
+
+5. For Enterprise Mode, verify your proxy address is correct in `config.yaml`
 
 ### Teleport Agent Not Starting
 
@@ -682,7 +773,8 @@ To move from **Sandbox** to **Production**, the following refactoring is mandato
 make helm-clean
 ```
 
-This will:
+This runs `python3 src/main.py clean`, which orchestrates cleanup using `src/clean/__init__.py`:
+
 - Stop port-forward (if running)
 - Uninstall Teleport Kube Agent
 - Uninstall Kubernetes Dashboard
@@ -690,11 +782,36 @@ This will:
 - Remove namespaces
 - Clean up RBAC resources
 
+### Available Make Commands
+
+The Makefile provides convenient wrappers around the single Python entry point:
+
+**Deployment:**
+- `make helm-deploy` → `python3 src/main.py deploy` (or `python3 src/main.py` - deploy is default)
+- `make helm-clean` → `python3 src/main.py clean`
+- `make helm-status` → `python3 src/main.py helm-status`
+
+**Utilities:**
+- `make get-tokens` → `python3 src/main.py get-tokens`
+- `make get-clusterip` → `python3 src/main.py get-clusterip`
+- `make status` → `python3 src/main.py status`
+- `make logs` → `python3 src/main.py logs`
+
+**Note:** All commands automatically check for and create a virtual environment (`venv`) if it doesn't exist, ensuring dependencies are installed before execution.
+
+**Minikube Management (Shell-based):**
+- `make config` - Create config.yaml from example
+- `make setup-minikube` - Set up minikube cluster
+- `make check-minikube` - Check minikube installation
+- `make start-minikube` - Start minikube
+- `make stop-minikube` - Stop minikube
+- `make reset-minikube` - Reset minikube cluster
+
 ### Manual Cleanup
 
 ```bash
 # Stop port-forward (Local Mode)
-pkill -f "kubectl port-forward.*teleport.*443"
+pkill -f "kubectl port-forward.*teleport.*8080"
 
 # Remove Helm releases
 helm uninstall teleport-agent --namespace teleport-agent
